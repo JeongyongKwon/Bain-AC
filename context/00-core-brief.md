@@ -36,7 +36,7 @@ Who decides what, at what threshold, and on what cycle. This determines whether 
 
 ## What we are watching
 
-The two or three external variables that would most change our strategy if they moved, with the current reading on each. This is what the weekly delta review checks against, so keep it current and keep it observable — a variable nobody can measure is not a trigger, it is a worry.
+The two or three external variables that would most change our strategy if they moved, with the current reading on each. This is what the daily delta review checks against, so keep it current and keep it observable — a variable nobody can measure is not a trigger, it is a worry. At daily frequency an unobservable trigger is worse than at weekly: the delta review runs against it every single day and has nothing to report each time.
 
 ---
 

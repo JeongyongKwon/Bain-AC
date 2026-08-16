@@ -1,6 +1,6 @@
 ---
 name: panel
-description: Run a full strategy panel round on a market research report — fact base, seven independent practice lenses, red team, and Partner synthesis. Use when a new market research report needs review, when the user asks to "run the panel" or "review this report", or when the weekly scheduled round fires. Takes a path to the report as its argument.
+description: Run a full strategy panel round on a market research report — fact base, seven independent practice lenses, red team, and Partner synthesis. Use when a new market research report needs review, when the user asks to "run the panel" or "review this report", or when the daily scheduled round fires. Takes a path to the report as its argument.
 ---
 
 # Panel Round
@@ -93,11 +93,11 @@ Then write a two-line note to the user: the recommendation, and the one thing th
 
 ---
 
-## Weekly rounds
+## Daily rounds
 
 On a scheduled run with no new report, the round is a **delta review** rather than a full pass. Read the most recent round's synthesis and its "what would change our view" triggers, then dispatch `research-desk` to check only whether any trigger has fired. If none has, write a short `delta.md` saying so and stop — do not run seven lenses to confirm nothing changed. If a trigger has fired, run the full pipeline scoped to the lenses it affects.
 
-A weekly cadence produces value only if it is honest about quiet weeks. A panel that manufactures findings to justify its schedule stops being read within a month.
+A daily cadence produces value only if it is honest about quiet days — most days will be quiet, because the underlying facts a strategy panel reasons about rarely move day to day. A panel that manufactures findings to justify its schedule stops being read within a week at this frequency.
 
 ---
 

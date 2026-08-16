@@ -94,8 +94,10 @@ exists to catch.
 
 ## Cost
 
-A full round is roughly **$7**; a quiet-week delta review about **$1.50**. Lens agents run on Sonnet 5, the Research Desk / Red Team / Partner on Opus 5 — change the `model:` line in any `.claude/agents/*.md` to shift the balance. Cost model and the reasoning behind the model split are in `docs/ARCHITECTURE.md`.
+A full round is roughly **$7**; a quiet-day delta review about **$1.50**. Lens agents run on Sonnet 5, the Research Desk / Red Team / Partner on Opus 5 — change the `model:` line in any `.claude/agents/*.md` to shift the balance. At **daily** cadence the delta review's cost is the one that dominates the monthly bill (~30 of them a month, not ~3), landing a realistic month around **$67** rather than the ~$12 a weekly schedule would cost. Full cost model in `docs/ARCHITECTURE.md`.
 
-## Weekly rounds
+## Daily rounds
 
-With no new report, `/panel` runs a **delta review**: it checks only whether any trigger from the last synthesis has fired, and reports that nothing changed if nothing did. A recurring panel that manufactures findings to justify its schedule stops being read — the quiet weeks have to actually be quiet.
+With no new report, `/panel` runs a **delta review**: it checks only whether any trigger from the last synthesis has fired, and reports that nothing changed if nothing did. At daily frequency, most days *are* quiet — a recurring panel that manufactures findings to justify its schedule burns trust within the first week.
+
+**Status:** this delta-review logic exists in the `/panel` skill for the Claude Code path. It is not yet implemented in `panel/pipeline.py` — the Python CLI's `run` command always executes the full pipeline, so unattended daily scheduling (cron/CI) needs that branch built first.

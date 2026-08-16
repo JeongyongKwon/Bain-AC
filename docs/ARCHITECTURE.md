@@ -12,9 +12,9 @@ Three requirements shaped every decision here, and they pull against each other.
 
 **No hallucination.** MBB work is defensible or it is worthless. A number a client cannot trace to a source is a liability, and one wrong figure in a steering committee costs more credibility than the whole deck buys.
 
-**Recurring, weekly.** Which means the cost of a round matters, and — less obviously — the panel must be honest about weeks where nothing happened.
+**Recurring, daily.** Which means the cost of a round matters a great deal — thirty rounds a month, not four — and, less obviously, the panel must be honest about the days where nothing happened, since at daily frequency most of them will be.
 
-These are in tension. Independence multiplies cost. Verification multiplies cost further. Weekly cadence multiplies it again. The architecture resolves this by making verification a **shared, once-per-round asset** rather than something each lens redoes, and by making quiet weeks genuinely cheap.
+These are in tension. Independence multiplies cost. Verification multiplies cost further. Daily cadence multiplies it hardest of all — a weekly schedule spends on a full round roughly four times a month; daily spends the delta-review cost up to thirty times. The architecture resolves this by making verification a **shared, once-per-round asset** rather than something each lens redoes, and by making quiet days genuinely, deeply cheap — the delta review has to cost close to nothing, because it runs almost every day.
 
 ---
 
@@ -141,11 +141,16 @@ Per full round, at Opus 5 ($5/$25 per MTok) and Sonnet 5 ($3/$15):
 | Red team | ~$1.15 |
 | Partner synthesis | ~$1.10 |
 | **Full round** | **~$7** |
-| Delta review (quiet week) | ~$1.50 |
+| Delta review (quiet day) | ~$1.50 |
 
-A realistic month — one new report plus three delta reviews — lands around **$12**. Running every agent on Opus 5 raises a full round to roughly $9.
+At **daily** cadence the delta review's cost is the number that actually matters, because it runs on nearly every one of the thirty days a month, not on three out of four weeks. A realistic month — say four new reports plus twenty-six delta reviews — lands around **$67**, versus roughly $12 on a weekly schedule. That five-to-six-times jump is the direct price of daily frequency, and it is worth stating plainly rather than discovering on a bill: **daily cadence is a cost decision, not just a scheduling one.**
 
-Two levers if cost becomes a constraint: move `red-team` to Sonnet 5 (saves ~$0.70/round, some loss in challenge quality), or drop to a five-lens roster for routine reports. Do not economise on the Research Desk — it is the cheapest phase and the one everything else depends on.
+Two levers if that cost becomes a constraint, in order of how much they help at daily frequency:
+
+- **Shrink the delta review itself.** It is already scoped to one `research-desk` dispatch, but a cheaper trigger check — Sonnet 5 instead of Opus 5, or a narrower prompt that only re-checks the named triggers rather than re-reading the whole prior synthesis — pays off thirty times a month instead of the four-to-five times a lens-roster cut would.
+- Move `red-team` to Sonnet 5 (saves ~$0.70 per *full* round, some loss in challenge quality), or drop to a five-lens roster for routine reports — these still help, but they discount the ~$28/month of full rounds, not the ~$39/month of delta reviews that dominates at daily cadence.
+
+Do not economise on the Research Desk itself — it is the cheapest phase and the one everything else depends on.
 
 ### Why not a vector database
 
@@ -157,11 +162,13 @@ The interface is retrieval-shaped anyway: agents ask the index what exists and o
 
 ---
 
-## Weekly cadence
+## Daily cadence
 
-A weekly round on a report that has not changed produces noise. The `/panel` skill handles this with a **delta review**: read the previous synthesis's "what would change our view" triggers, dispatch only the Research Desk to check whether any has fired, and stop if none has.
+A daily round on a report that has not changed produces noise, and at daily frequency this is the default case rather than the exception — most days, nothing a strategy panel would care about has actually moved. The `/panel` skill handles this with a **delta review**: read the previous synthesis's "what would change our view" triggers, dispatch only the Research Desk to check whether any has fired, and stop if none has.
 
-This is the discipline that keeps a recurring panel credible. A panel that manufactures findings to justify its schedule stops being read within a month — and the failure is silent, because the reports keep arriving.
+This is the discipline that keeps a recurring panel credible, and it matters more at daily cadence than it would weekly. A panel that manufactures findings to justify its schedule stops being read within a month at weekly frequency; at daily frequency the same failure — a "finding" every single day — would be obvious and would burn trust within the first week. The failure is otherwise silent, because the reports keep arriving regardless of whether anything happened.
+
+**Not yet built.** The delta-review logic above exists as instructions in the `/panel` skill (the Claude Code path) but has no equivalent in the Python `panel/pipeline.py` yet — the CLI's `run` command always executes the full five-phase pipeline. Daily scheduling via cron or CI needs the delta-review branch implemented in Python before it can run unattended; running the full ~$7 round daily instead would cost roughly $210/month rather than the ~$67 estimated above.
 
 ---
 
