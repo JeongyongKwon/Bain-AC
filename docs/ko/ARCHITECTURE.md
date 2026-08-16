@@ -149,6 +149,30 @@ Python 런타임에서는 `await`가, Claude Code에서는 EM의 단계 검사�
 
 ---
 
+## 교체 가능한 모델 백엔드
+
+`panel/pipeline.py`는 `claude_agent_sdk`를 import하지 않는다. 대신 `panel.runners.AgentRunner` — 메서드 하나짜리 인터페이스 `run(agent_name, system_prompt, task, tools, model, cwd, max_budget_usd) -> RunnerOutcome` — 를 import한다. 프로바이더별 구현은 전부 `panel/runners/` 뒤에 있다.
+
+```
+panel/runners/
+  base.py               AgentRunner(추상), RunnerOutcome
+  registry.py            이름 → 클래스, 지연 임포트
+  claude_agent_sdk.py     기본값 — claude_agent_sdk.query()를 감쌈
+  mock.py                 네트워크·의존성 없음 — 정해진 응답 반환, 모든 호출 기록
+```
+
+"API를 다른 걸로 바꿀 수도 있다"는 이 프로젝트에서 실제로 가까운 미래에 일어날 수 있는 일이지, 과설계할 가치가 있는 가상의 시나리오가 아니다. 이 분리는 구체적으로 세 가지를 얻는다.
+
+- **프로바이더가 바뀌어도 오케스트레이션 로직이 퇴행할 수 없다.** 단계 블로킹, 병렬 디스패치, 예산 처리, QC 전부 `mock`을 대상으로 테스트된다 — 테스트 스위트의 상당 부분이 네트워크 호출 없이, `claude-agent-sdk` 설치 여부와 무관하게 `panel/pipeline.py`를 직접 검증한다. `AgentRunner` 계약을 지키는 프로바이더 교체는 이 테스트들을 깨뜨릴 수 없다 — 애초에 프로바이더를 import한 적이 없기 때문이다. 실제로 이 테스트를 작성하는 과정에서 진짜 버그 하나가 드러났다: `Phase.blocking`이 기본값 `True`였는데 2~4단계에서 명시적으로 덮어쓰지 않아서, 렌즈 하나만 실패해도 레드팀·파트너가 돌기 전에 라운드 전체가 조용히 종료되고 있었다. 원래 1단계(사실 베이스)만 강제 게이트여야 한다 — 위 "왜 1단계가 막는가" 참조. 실제 돈을 쓰지 않고 에이전트 하나를 실패시켜 관찰할 수 있는 테스트가 없었다면 보이지 않았을 문제다.
+- **`claude-agent-sdk`는 선택 의존성**이지 필수가 아니다 (`pip install -e ".[claude-agent-sdk]"`). 기본 패키지(`pyyaml`과 표준 라이브러리)만으로 오케스트레이터·에이전트 로더·QC 검증기가 전부 돌아간다. 다른 백엔드만 쓰는 배포 환경은 Anthropic의 에이전트 SDK를 아예 설치할 필요가 없다.
+- **프로바이더 추가는 침습적이지 않고 가산적이다.** `AgentRunner.run()`을 구현하는 클래스를 쓰고, 이름으로 등록하고(`panel/runners/registry.py`의 `_BUILTIN_MODULES`, 또는 패키지 밖에서 `register_runner()` 호출), `panel run --runner <이름>` 또는 `RoundConfig(runner=...)`로 선택 가능해진다. 기존 파일은 하나도 바뀌지 않는다.
+
+**경계를 넘는 것과 넘지 않는 것.** `tools`와 `model`은 `.claude/agents/*.md` frontmatter의 원본 문자열(`Read, Write, Bash`; `opus`, `sonnet`, `inherit`) 그대로 전달된다 — 해석은 선택된 러너의 몫이지 파이프라인의 몫이 아니다. 프로바이더를 바꿀 때 `panel/runners/` 바깥에서 유일하게 손댈 곳이 여기다: 다른 API의 도구 이름이나 모델 별칭 체계가 다르면 에이전트 파일의 `tools:`/`model:` 줄을 다시 써야 한다 — 에이전트 설정의 다른 어떤 부분을 편집하는 것과 동일한 일이다. `panel/pipeline.py`, `panel/config.py`, `panel/verify.py`는 건드리지 않는다.
+
+**새 러너가 다시 구현할 필요 없는 것.** 재시도, 스트리밍, 도구 호출 루프, 사고(thinking) 블록 처리, 예산 집행 메커니즘 — 이 전부는 러너가 감싸는 클라이언트 라이브러리 내부의 일이다. `AgentRunner.run()`은 실제 호출이 끝난 뒤 `RunnerOutcome(text, turns, error)`만 반환하면 된다. Claude Messages API 위에 직접 구현한 러너(에이전트 SDK의 도구 루프를 우회하고 도구 호출을 직접 처리하는)도 정당한 두 번째 구현이고, `claude_agent_sdk.py`와 비슷한 규모일 것이다.
+
+---
+
 ## 두 개의 런타임
 
 같은 에이전트 정의가 두 환경에서 돈다.

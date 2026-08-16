@@ -172,6 +172,30 @@ This is the discipline that keeps a recurring panel credible, and it matters mor
 
 ---
 
+## Swappable model backend
+
+`panel/pipeline.py` does not import `claude_agent_sdk`. It imports `panel.runners.AgentRunner` -- an interface with one method, `run(agent_name, system_prompt, task, tools, model, cwd, max_budget_usd) -> RunnerOutcome`. Everything provider-specific lives behind that boundary, in `panel/runners/`:
+
+```
+panel/runners/
+  base.py               AgentRunner (abstract), RunnerOutcome
+  registry.py            name -> class, lazy-imported
+  claude_agent_sdk.py     the default -- wraps claude_agent_sdk.query()
+  mock.py                 no network, no dependency -- canned responses, records every call
+```
+
+This split exists because "the API might get swapped for a different one" is a real, near-term possibility for this project, not a hypothetical worth over-engineering for. Concretely, it buys three things:
+
+- **The orchestration logic cannot regress when the provider changes.** Phase blocking, parallel dispatch, budget handling, and QC are all tested against `mock` — a large share of the test suite exercises `panel/pipeline.py` directly, with zero network calls and zero dependency on `claude-agent-sdk` being installed. A provider swap that keeps the `AgentRunner` contract cannot break any of them, because they never imported the provider in the first place. Writing these tests is in fact how a real bug surfaced: `Phase.blocking` defaulted to `True` and was never overridden on phases 2-4, so a single lens failing silently killed the whole round before the red team or Partner ever ran. Only phase 1 (the fact base) is supposed to be a hard gate -- see § Why Phase 1 blocks above. That was invisible without a test that could actually watch one agent fail without spending real money.
+- **`claude-agent-sdk` is an optional dependency**, not a required one (`pip install -e ".[claude-agent-sdk]"`). The base package (`pyyaml` plus the standard library) is everything the orchestrator, the agent loader, and the QC verifier need. A deployment that only ever runs against a different backend never installs Anthropic's agent SDK at all.
+- **Adding a provider is additive, not invasive.** Write a class implementing `AgentRunner.run()`, register it under a name (`panel/runners/registry.py`'s `_BUILTIN_MODULES`, or `register_runner()` from outside the package entirely), and it is selectable via `panel run --runner <name>` or `RoundConfig(runner=...)`. No existing file changes.
+
+**What crosses the boundary, and what doesn't.** `tools` and `model` are passed through as the raw strings from `.claude/agents/*.md` frontmatter (`Read, Write, Bash`; `opus`, `sonnet`, `inherit`) -- interpreting them is the selected runner's job, not the pipeline's. This is the one place a provider swap still touches something outside `panel/runners/`: a different API's tool names or model aliases mean revisiting the `tools:`/`model:` lines in the agent files, same as editing any other piece of an agent's configuration. It does not mean touching `panel/pipeline.py`, `panel/config.py`, or `panel/verify.py`.
+
+**What a new runner does not need to reimplement.** Retries, streaming, tool-call loops, thinking-block handling, budget enforcement mechanics -- all of that is internal to whatever client library the runner wraps. `AgentRunner.run()` only has to return `RunnerOutcome(text, turns, error)` once the underlying call is done. A runner built directly on the Claude Messages API (bypassing the Agent SDK's tool loop and driving tool calls by hand) is a legitimate second implementation and would be roughly the same size as `claude_agent_sdk.py`.
+
+---
+
 ## Extending the roster
 
 Adding a lens is one file in `.claude/agents/` plus one line in the `/panel` skill's Phase 2 dispatch list. Copy an existing lens and change three things:

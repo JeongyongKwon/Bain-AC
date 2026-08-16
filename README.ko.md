@@ -13,13 +13,17 @@ MBB 엔게이지먼트 팀 구조를 따르는 10개 에이전트로 구성된�
 **1. Python CLI** — 헤드리스, 스케줄러/CI용
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,claude-agent-sdk]"   # dev = pytest; claude-agent-sdk = 기본 러너
 
-panel run inbox/report.pdf --lang ko    # 한국어 보고서 생성
-panel run inbox/report.pdf --dry-run    # 비용 없이 실행 계획만 확인
-panel roster                            # 로드된 에이전트와 단계 그래프
-panel qc reports/2026-08-16-report      # 완료된 라운드 재검사
+panel run inbox/report.pdf --lang ko      # 한국어 보고서 생성
+panel run inbox/report.pdf --dry-run      # 비용 없이 실행 계획만 확인
+panel run inbox/report.pdf --runner mock  # 전체 파이프라인을 오프라인·무료로 검증
+panel roster                              # 로드된 에이전트와 단계 그래프
+panel runners                             # 사용 가능한 모델 API 백엔드 목록
+panel qc reports/2026-08-16-report        # 완료된 라운드 재검사
 ```
+
+모델 API는 교체 가능하게 설계했다 — `panel/pipeline.py`는 특정 프로바이더 SDK를 직접 import하지 않고, `panel/runners/`의 `AgentRunner` 인터페이스만 안다. `claude-agent-sdk`가 **선택** 의존성인 이유가 이것이다: `pip install -e ".[dev]"`만으로도 오케스트레이터·에이전트 로더·`mock` 러너가 전부 동작하며, Anthropic 종속 코드는 하나도 필요하지 않다. 자세한 내용은 `docs/ko/ARCHITECTURE.md`의 "교체 가능한 모델 백엔드" 절 참조.
 
 **2. Claude Code 대화형**
 
@@ -73,6 +77,7 @@ panel qc reports/2026-08-16-report      # 완료된 라운드 재검사
 .claude/agents/       10개 에이전트 정의 — 로스터를 바꾸려면 여기를 편집
 .claude/skills/panel/ /panel 오케스트레이터 (Claude Code용)
 panel/                Python 런타임 — 파이프라인, 로더, QC 검증기
+panel/runners/         프로바이더 경계 — AgentRunner 인터페이스와 구현체들
 tests/                40개 테스트 (pytest)
 context/              오프라인 컨텍스트 팩. INDEX.md가 매니페스트
 docs/                 영문 문서
@@ -102,7 +107,7 @@ reports/              라운드 산출물
 ## 개발
 
 ```bash
-python3 -m pytest tests/ -q     # 40 passed
+python3 -m pytest tests/ -q     # 64 passed — API 키나 네트워크 불필요, `mock` 러너가 나머지를 커버
 ```
 
 QC 검증기(`panel/verify.py`)는 순수 함수로 작성되어 있고 모델 호출이 없다. 증거 계약 검사가 LLM 판단에 의존하면, 그것이 막으려는 실패 양상을 그대로 물려받기 때문이다.

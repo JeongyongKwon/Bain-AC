@@ -13,13 +13,17 @@ Two runtimes, one shared set of agent definitions.
 **Python CLI** — headless, for schedulers and CI:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,claude-agent-sdk]"   # dev = pytest; claude-agent-sdk = the default runner
 
 panel run inbox/report.pdf --lang ko    # reports written in Korean
 panel run inbox/report.pdf --dry-run    # show the plan, spend nothing
+panel run inbox/report.pdf --runner mock  # exercise the full pipeline offline, free
 panel roster                            # loaded agents and the phase graph
+panel runners                           # available model-API backends
 panel qc reports/2026-08-16-report      # re-check a completed round
 ```
+
+The model API is swappable — `panel/pipeline.py` never imports a provider SDK directly, only the `AgentRunner` interface in `panel/runners/`. `claude-agent-sdk` is an *optional* dependency for exactly this reason: `pip install -e ".[dev]"` alone gets you the orchestrator, the agent loader, and the `mock` runner, with nothing Anthropic-specific required. See `docs/ARCHITECTURE.md` § Swappable model backend.
 
 **Claude Code** — interactive:
 
@@ -69,6 +73,7 @@ No bare numbers. Every quantified claim carries a tag showing where it came from
 .claude/agents/       ten agent definitions — the single source of truth
 .claude/skills/panel/ the /panel orchestrator (Claude Code)
 panel/                Python runtime — pipeline, agent loader, QC verifier
+panel/runners/         the provider boundary — AgentRunner interface + implementations
 tests/                40 tests (pytest)
 context/              your offline context pack; INDEX.md is the manifest
 docs/                 HOUSE-STANDARD.md (evidence contract), ARCHITECTURE.md
@@ -85,7 +90,7 @@ without touching Python, and both runtimes pick up the change.
 ## Development
 
 ```bash
-python3 -m pytest tests/ -q     # 40 passed
+python3 -m pytest tests/ -q     # 64 passed — no API key or network needed; the `mock` runner covers the rest
 ```
 
 `panel/verify.py` is pure functions with no model calls. If the evidence-contract

@@ -8,7 +8,11 @@ That matters for the two structural guarantees the architecture rests on:
   * the lenses are blind -- `asyncio.gather` dispatches all seven at once, so
     none can read another's output because none of it exists yet.
 
-Neither depends on an agent remembering an instruction.
+Neither depends on an agent remembering an instruction, and neither depends on
+which model API is actually running the agents -- this module talks only to
+the `AgentRunner` interface in `panel.runners`, never to a provider SDK
+directly. See `panel/runners/base.py` for the boundary and `docs/ARCHITECTURE.md`
+§ Swappable model backend for why it is drawn there.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from pathlib import Path
 
 from panel.agents import LoadedAgent, load_roster, validate_roster
 from panel.config import PIPELINE, REQUIRED_AGENTS, Phase, RoundConfig
+from panel.runners import AgentRunner, get_runner
 from panel.verify import QCReport, run_qc
 
 
@@ -74,59 +79,54 @@ Every quantified claim carries an evidence tag. A number without one is a
 defect and will be sent back by the quality-control pass."""
 
 
-async def run_agent(agent: LoadedAgent, cfg: RoundConfig, phase: Phase) -> AgentRun:
-    """Invoke one agent to completion, collecting its output and cost."""
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ClaudeAgentOptions,
-        ResultMessage,
-        TextBlock,
-        query,
-    )
+async def run_agent(
+    agent: LoadedAgent,
+    cfg: RoundConfig,
+    phase: Phase,
+    runner: AgentRunner,
+) -> AgentRun:
+    """Invoke one agent to completion via the active runner.
 
+    Owns nothing provider-specific -- system prompt, task, tool list, and
+    model string go in as plain values; text and an optional error come back
+    the same way, regardless of which `AgentRunner` is behind `runner`.
+    """
     started = time.monotonic()
-    chunks: list[str] = []
-    turns = 0
-    error: str | None = None
-
-    options = ClaudeAgentOptions(
-        system_prompt=agent.prompt,
-        allowed_tools=agent.tools,
-        model=None if agent.model == "inherit" else agent.model,
-        cwd=str(cfg.project_root),
-        permission_mode="acceptEdits",
-        # Prompts are passed explicitly above; loading project settings as well
-        # would register the same roster twice.
-        setting_sources=[],
-        max_budget_usd=cfg.max_budget_usd,
-    )
-
     try:
-        async for message in query(prompt=build_task(agent, cfg, phase), options=options):
-            if isinstance(message, AssistantMessage):
-                turns += 1
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        chunks.append(block.text)
-            elif isinstance(message, ResultMessage):
-                if message.subtype == "failure":
-                    error = f"{message.terminal_reason}: {message.result}"
-    except Exception as exc:  # surfaced per-agent so one failure cannot sink the round
-        error = f"{type(exc).__name__}: {exc}"
-
-    return AgentRun(
-        name=agent.name,
-        seconds=time.monotonic() - started,
-        turns=turns,
-        text="\n".join(chunks),
-        error=error,
-    )
+        outcome = await runner.run(
+            agent_name=agent.name,
+            system_prompt=agent.prompt,
+            task=build_task(agent, cfg, phase),
+            tools=agent.tools,
+            model=agent.model,
+            cwd=cfg.project_root,
+            max_budget_usd=cfg.max_budget_usd,
+        )
+        return AgentRun(
+            name=agent.name,
+            seconds=time.monotonic() - started,
+            turns=outcome.turns,
+            text=outcome.text,
+            error=outcome.error,
+        )
+    except Exception as exc:
+        # A runner should return RunnerOutcome(error=...) for ordinary
+        # failures. This catches the extraordinary ones -- auth, network,
+        # a provider bug -- so one agent's crash cannot sink the round.
+        return AgentRun(
+            name=agent.name,
+            seconds=time.monotonic() - started,
+            turns=0,
+            text="",
+            error=f"{type(exc).__name__}: {exc}",
+        )
 
 
 async def run_phase(
     phase: Phase,
     roster: dict[str, LoadedAgent],
     cfg: RoundConfig,
+    runner: AgentRunner,
     log,
 ) -> list[AgentRun]:
     """Run one phase, in parallel where the phase says so."""
@@ -138,7 +138,7 @@ async def run_phase(
             log(f"   [dry-run] would dispatch {name} ({roster[name].model})")
         return [AgentRun(name=n, seconds=0.0, turns=0, text="") for n in phase.agents]
 
-    tasks = [run_agent(roster[name], cfg, phase) for name in phase.agents]
+    tasks = [run_agent(roster[name], cfg, phase, runner) for name in phase.agents]
 
     if phase.parallel:
         runs = await asyncio.gather(*tasks)
@@ -151,15 +151,24 @@ async def run_phase(
     return list(runs)
 
 
-async def run_round(cfg: RoundConfig, log=print) -> RoundResult:
-    """Execute a full panel round and return its result."""
+async def run_round(cfg: RoundConfig, log=print, runner: AgentRunner | None = None) -> RoundResult:
+    """Execute a full panel round and return its result.
+
+    `runner` defaults to `get_runner(cfg.runner)` -- pass one explicitly to
+    inject a pre-configured instance (a `MockRunner` with canned responses,
+    for instance) without going through the string-keyed registry. The CLI
+    never passes this; it exists for tests and for callers embedding the
+    pipeline in a larger program.
+    """
     roster = load_roster(cfg.agents_dir, lang=cfg.lang)
     validate_roster(roster, REQUIRED_AGENTS)
     cfg.ensure_dirs()
+    runner = runner or get_runner(cfg.runner)
 
     log(f"Round      {cfg.round_dir.name}")
     log(f"Report     {cfg.report_path}")
     log(f"Language   {cfg.lang}")
+    log(f"Runner     {cfg.runner}")
     log(f"Agents     {len(roster)} loaded from {cfg.agents_dir.relative_to(cfg.project_root)}")
     if cfg.max_budget_usd:
         log(f"Budget     ${cfg.max_budget_usd:.2f} per agent")
@@ -170,7 +179,7 @@ async def run_round(cfg: RoundConfig, log=print) -> RoundResult:
     result = RoundResult(round_dir=cfg.round_dir)
 
     for phase in PIPELINE:
-        runs = await run_phase(phase, roster, cfg, log)
+        runs = await run_phase(phase, roster, cfg, runner, log)
         result.runs += runs
 
         # A phase-1 failure is fatal: every downstream agent cites the fact

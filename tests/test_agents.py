@@ -71,6 +71,18 @@ def test_pipeline_covers_every_agent():
     assert in_pipeline == set(load_roster(AGENTS_DIR))
 
 
+def test_only_phase_one_is_blocking():
+    """Only the fact base should abort the round outright on failure -- a
+    lens, the red team, or the Partner failing should be visible in the
+    result and in phase-5 QC, not swallow the rest of the round. Regression
+    guard for a bug where the Phase.blocking default of True was left
+    un-overridden on phases 2-4, silently killing the round on any single
+    lens failure. See tests/test_pipeline.py for the behavioural version of
+    this check."""
+    blocking = {phase.number: phase.blocking for phase in PIPELINE}
+    assert blocking == {1: True, 2: False, 3: False, 4: False}
+
+
 def test_lenses_cannot_run_bash():
     """Tool restriction is enforced by the runtime, not by asking politely."""
     roster = load_roster(AGENTS_DIR)

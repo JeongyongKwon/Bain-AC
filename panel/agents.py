@@ -1,9 +1,15 @@
-"""Load agent definitions from .claude/agents/*.md into SDK objects.
+"""Load agent definitions from .claude/agents/*.md into plain Python values.
 
 The markdown files stay the single source of truth -- a strategist can edit a
 lens prompt without touching Python, and the same files still work when the
 panel is driven interactively from Claude Code. This module is the bridge, not
 a second definition of the roster.
+
+Deliberately provider-agnostic: a `LoadedAgent` is a name, a description, a
+prompt, a tool list, and a model string -- nothing here imports a model API's
+SDK. That conversion happens once, inside whichever `panel.runners.AgentRunner`
+is selected for the round, so this module does not need to change when the
+API behind the panel does.
 """
 
 from __future__ import annotations
@@ -36,7 +42,12 @@ class AgentLoadError(RuntimeError):
 
 @dataclass(frozen=True)
 class LoadedAgent:
-    """A parsed agent definition, before conversion to an SDK object."""
+    """A parsed agent definition -- provider-neutral, ready for any runner.
+
+    `model` is the raw string from frontmatter (`opus`, `sonnet`, `inherit`,
+    or whatever alias scheme the target API uses). Interpreting it is the
+    active runner's job, not this module's -- see panel/runners/base.py.
+    """
 
     name: str
     description: str
@@ -44,21 +55,6 @@ class LoadedAgent:
     tools: list[str]
     model: str
     source: Path
-
-    def to_sdk(self):
-        """Convert to the SDK's AgentDefinition.
-
-        Imported lazily so that parsing, validation, and the whole test suite
-        run without claude-agent-sdk installed.
-        """
-        from claude_agent_sdk import AgentDefinition
-
-        return AgentDefinition(
-            description=self.description,
-            prompt=self.prompt,
-            tools=self.tools,
-            model=self.model,
-        )
 
 
 def parse_agent(text: str, source: Path) -> LoadedAgent:

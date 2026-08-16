@@ -36,13 +36,20 @@ class Phase:
 
     `parallel` is what enforces lens isolation: the seven lenses are dispatched
     together, so none can read another's output because none of it exists yet.
+
+    `blocking` defaults to False: an agent failure is visible in the round's
+    result and in phase-5 QC, but only phase 1's fact base is load-bearing
+    enough to justify aborting the round outright over one agent's failure --
+    see docs/ARCHITECTURE.md § Why Phase 1 blocks. Set it explicitly, per
+    phase, rather than leaving readers to notice a default that only one
+    phase actually wants.
     """
 
     number: int
     name: str
     agents: tuple[str, ...]
     parallel: bool = False
-    blocking: bool = True
+    blocking: bool = False
     produces: tuple[str, ...] = ()
 
 
@@ -51,6 +58,7 @@ PIPELINE: tuple[Phase, ...] = (
         number=1,
         name="fact base",
         agents=(RESEARCH_DESK,),
+        blocking=True,  # the one hard gate -- see the Phase docstring above
         produces=("01-fact-base.md", "01-contradictions.md"),
     ),
     Phase(
@@ -94,6 +102,7 @@ class RoundConfig:
     when: date = field(default_factory=date.today)
     max_budget_usd: float | None = 15.0
     dry_run: bool = False
+    runner: str = "claude-agent-sdk"  # which model API drives every agent this round; see panel/runners/
 
     @property
     def agents_dir(self) -> Path:

@@ -2,8 +2,10 @@
 
     panel run inbox/report.pdf --lang ko
     panel run inbox/report.pdf --dry-run
+    panel run inbox/report.pdf --runner mock
     panel qc reports/2026-08-16-report
     panel roster
+    panel runners
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from pathlib import Path
 from panel.agents import AgentLoadError, load_roster, validate_roster
 from panel.config import PIPELINE, REQUIRED_AGENTS, RoundConfig
 from panel.pipeline import run_round
+from panel.runners import UnknownRunnerError, available_runners
 from panel.verify import run_qc
 
 
@@ -54,6 +57,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         lang=args.lang,
         max_budget_usd=args.budget,
         dry_run=args.dry_run,
+        runner=args.runner,
     )
     result = asyncio.run(run_round(cfg))
 
@@ -92,6 +96,18 @@ def cmd_roster(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_runners(args: argparse.Namespace) -> int:
+    print("Available runners (select with `panel run --runner <name>`):\n")
+    for name in available_runners():
+        print(f"   {name}")
+    print(
+        "\nA runner implements panel.runners.AgentRunner. The pipeline never "
+        "imports a provider SDK directly — swap the model API by adding a "
+        "runner here, not by editing panel/pipeline.py. See panel/runners/base.py."
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="panel", description="MBB-style strategy panel")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -101,6 +117,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--lang", default="en", choices=["en", "ko"], help="output language for the reports")
     run.add_argument("--budget", type=float, default=15.0, help="max USD per agent (default: 15)")
     run.add_argument("--dry-run", action="store_true", help="show the plan without dispatching agents")
+    run.add_argument(
+        "--runner",
+        default="claude-agent-sdk",
+        help="model API to run agents against (default: claude-agent-sdk; see `panel runners`)",
+    )
     run.set_defaults(func=cmd_run)
 
     qc = sub.add_parser("qc", help="re-run quality control on a completed round")
@@ -110,6 +131,9 @@ def build_parser() -> argparse.ArgumentParser:
     roster = sub.add_parser("roster", help="list the loaded agents and the phase graph")
     roster.add_argument("--lang", default="en", choices=["en", "ko"])
     roster.set_defaults(func=cmd_roster)
+
+    runners = sub.add_parser("runners", help="list available model-API backends")
+    runners.set_defaults(func=cmd_runners)
 
     return parser
 
@@ -121,6 +145,9 @@ def main(argv: list[str] | None = None) -> int:
     except AgentLoadError as exc:
         print(f"Agent load error: {exc}", file=sys.stderr)
         return 3
+    except UnknownRunnerError as exc:
+        print(f"Runner error: {exc}", file=sys.stderr)
+        return 4
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         return 130
