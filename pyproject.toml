@@ -1,0 +1,25 @@
+[project]
+name = "bain-ac-panel"
+version = "0.1.0"
+description = "An MBB-style strategy panel: verified fact base, seven blind lenses, red team, Partner synthesis."
+requires-python = ">=3.11"
+dependencies = [
+    "claude-agent-sdk>=0.1.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+panel = "panel.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["panel"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

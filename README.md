@@ -4,13 +4,28 @@ A multi-agent strategy panel. Give it a market research report; it returns a fac
 
 Built as ten agents modelled on an MBB engagement team: a Research & Data Services desk that owns the verified fact base, seven practice lenses that read the report independently, a red team that attacks their work, and a Partner who decides.
 
+> 한국어: [`README.ko.md`](README.ko.md)
+
 ## Run a round
+
+Two runtimes, one shared set of agent definitions.
+
+**Python CLI** — headless, for schedulers and CI:
+
+```bash
+pip install -e ".[dev]"
+
+panel run inbox/report.pdf --lang ko    # reports written in Korean
+panel run inbox/report.pdf --dry-run    # show the plan, spend nothing
+panel roster                            # loaded agents and the phase graph
+panel qc reports/2026-08-16-report      # re-check a completed round
+```
+
+**Claude Code** — interactive:
 
 ```
 /panel inbox/some-market-report.pdf
 ```
-
-Or drop the report in `inbox/` and run `/panel` with no argument.
 
 Output lands in `reports/YYYY-MM-DD-<slug>/`. The deliverable is `04-partner-synthesis.md`; everything else is the audit trail behind it.
 
@@ -51,13 +66,31 @@ No bare numbers. Every quantified claim carries a tag showing where it came from
 ## Layout
 
 ```
-.claude/agents/       ten agent definitions — edit these to change the roster
-.claude/skills/panel/ the /panel orchestrator (Engagement Manager)
+.claude/agents/       ten agent definitions — the single source of truth
+.claude/skills/panel/ the /panel orchestrator (Claude Code)
+panel/                Python runtime — pipeline, agent loader, QC verifier
+tests/                40 tests (pytest)
 context/              your offline context pack; INDEX.md is the manifest
 docs/                 HOUSE-STANDARD.md (evidence contract), ARCHITECTURE.md
+docs/ko/              Korean documentation
 inbox/                drop new reports here
 reports/              round outputs
 ```
+
+The markdown in `.claude/` is executable configuration — its YAML frontmatter
+enforces model routing and tool permissions at runtime, and `panel/agents.py`
+loads the same files into SDK objects. A strategist can retune a lens prompt
+without touching Python, and both runtimes pick up the change.
+
+## Development
+
+```bash
+python3 -m pytest tests/ -q     # 40 passed
+```
+
+`panel/verify.py` is pure functions with no model calls. If the evidence-contract
+check were itself an LLM call, it would inherit exactly the failure mode it
+exists to catch.
 
 ## Cost
 
