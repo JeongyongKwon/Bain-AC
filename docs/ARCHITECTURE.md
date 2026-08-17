@@ -2,6 +2,8 @@
 
 A strategy panel that takes a market research report and returns a defensible recommendation — built as ten agents with a verification spine, an isolation rule, and a challenge function.
 
+> This document covers the panel itself — the ten agents and the pipeline that runs them. What feeds the panel in the first place (natural-language context, verified research, human-selected memory across rounds) is covered separately in [`CONTEXT-MEMORY-ARCHITECTURE.md`](CONTEXT-MEMORY-ARCHITECTURE.md) — a target architecture, not yet built.
+
 ---
 
 ## The design problem

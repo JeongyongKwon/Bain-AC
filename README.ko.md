@@ -438,6 +438,7 @@ python3 -m pytest tests/ -q
 |---|---|
 | [`docs/ko/ARCHITECTURE.md`](docs/ko/ARCHITECTURE.md) | 설계 근거 전문 — 왜 이 구조인지, 왜 벡터 DB를 안 쓰는지, 프로바이더 경계를 어디에 그었는지 |
 | [`docs/ko/HOUSE-STANDARD.md`](docs/ko/HOUSE-STANDARD.md) | 에이전트들이 따르는 증거 계약 전문. 산출물을 평가할 기준이기도 합니다 |
+| [`docs/ko/CONTEXT-MEMORY-ARCHITECTURE.md`](docs/ko/CONTEXT-MEMORY-ARCHITECTURE.md) | 렌즈들에게 무엇을 먹일지 — Natural Context, Fact Base, Human-selected Memory를 Context Package로 합치는 목표 아키텍처 (아직 미구현) |
 | [`README.md`](README.md) | 영문판 |
 
 ---

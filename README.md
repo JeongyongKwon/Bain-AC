@@ -55,7 +55,7 @@ The design turns on three choices:
 - **The lenses are blind to each other.** Dispatched in parallel, so none can read another's conclusion and anchor on it. Their disagreements are the product.
 - **Challenge is separate from decision.** The red team attacks; the Partner decides. An agent that has just attacked the work is badly placed to then stand behind it.
 
-Full reasoning in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Full reasoning in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). What feeds the lenses in the first place — natural-language context, verified research, and human-selected memory from past rounds — is covered separately in [`docs/CONTEXT-MEMORY-ARCHITECTURE.md`](docs/CONTEXT-MEMORY-ARCHITECTURE.md) (target architecture; not yet built).
 
 ## The evidence rule
 
