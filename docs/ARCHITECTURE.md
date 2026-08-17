@@ -43,6 +43,30 @@ This system implements both. The seven lenses supply the domain views; four craf
 | `red-team` | Craft | Adversarial challenge across all lenses |
 | `partner-synthesis` | Craft | Conflict resolution, the recommendation |
 
+```mermaid
+flowchart TB
+    subgraph CRAFT["Craft roles — what you DO"]
+        direction LR
+        EM["/panel skill (EM)<br/>orchestrator, not a subagent<br/>scoping · dispatch · QC"]
+        RD["research-desk<br/>opus · only agent with Bash<br/>owns the fact base"]
+        RT["red-team<br/>opus · sees all 7 lens reports<br/>adversarial challenge"]
+        PS["partner-synthesis<br/>opus · no WebSearch / WebFetch<br/>decides from the fact base only"]
+    end
+    subgraph LENS["Practice lenses — what you KNOW<br/>(all sonnet, none has Bash)"]
+        direction LR
+        L1[market-strategy]
+        L2[commercial]
+        L3[corporate-finance]
+        L4[operations]
+        L5[organization]
+        L6[digital-tech]
+        L7[risk-regulatory]
+    end
+
+    style RD fill:#f9d5d5,stroke:#c0392b
+    style PS fill:#d5e8f9,stroke:#2980b9
+```
+
 The Engagement Manager is the `/panel` skill itself rather than a subagent. It needs to see every phase's output to quality-control it, which is exactly what the orchestrating context already does — making it a subagent would add a hop and lose the visibility.
 
 ---

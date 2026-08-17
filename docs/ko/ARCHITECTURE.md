@@ -45,6 +45,30 @@
 | `red-team` | 크래프트 | 전 렌즈에 대한 적대적 도전 |
 | `partner-synthesis` | 크래프트 | 충돌 해소, 권고 |
 
+```mermaid
+flowchart TB
+    subgraph CRAFT["크래프트 역할 — 무엇을 하는가"]
+        direction LR
+        EM["/panel 스킬 (EM)<br/>오케스트레이터, 서브에이전트 아님<br/>스코핑 · 디스패치 · 품질 관리"]
+        RD["research-desk<br/>opus · Bash를 가진 유일한 에이전트<br/>사실 베이스를 소유"]
+        RT["red-team<br/>opus · 일곱 렌즈 보고서를 모두 봄<br/>적대적 도전"]
+        PS["partner-synthesis<br/>opus · WebSearch/WebFetch 없음<br/>사실 베이스만으로 결정"]
+    end
+    subgraph LENS["실무 렌즈 — 무엇을 아는가<br/>(전원 sonnet, Bash 없음)"]
+        direction LR
+        L1[market-strategy]
+        L2[commercial]
+        L3[corporate-finance]
+        L4[operations]
+        L5[organization]
+        L6[digital-tech]
+        L7[risk-regulatory]
+    end
+
+    style RD fill:#f9d5d5,stroke:#c0392b
+    style PS fill:#d5e8f9,stroke:#2980b9
+```
+
 EM은 서브에이전트가 아니라 `/panel` 스킬 자체다. 각 단계의 산출물을 봐야 품질 관리를 할 수 있는데, 그것이 오케스트레이션 컨텍스트가 이미 하는 일이다. 서브에이전트로 만들면 홉이 하나 늘고 가시성을 잃는다.
 
 ---
