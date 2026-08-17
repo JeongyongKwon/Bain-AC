@@ -51,24 +51,30 @@ EM은 서브에이전트가 아니라 `/panel` 스킬 자체다. 각 단계의 �
 
 ## 파이프라인
 
-```
-0단계  EM — 리포트·컨텍스트를 읽고 태스킹 브리프 작성
-   ↓
-1단계  research-desk                              [블로킹]
-       모든 주장을 검증·등급화 → 01-fact-base.md
-   ↓
-2단계  일곱 렌즈 — 병렬, 상호 비공개
-       market / commercial / corpfin / ops / org / tech / risk
-       F-id만 인용 → lenses/*.md
-   ↓
-3단계  red-team — 전체를 보는 첫 에이전트
-       → 02-red-team.md
-       심각도 HIGH + 메울 수 있는 공백 → 1단계로 되돌림
-   ↓
-4단계  partner-synthesis
-       → 03-conflict-map.md, 04-partner-synthesis.md
-   ↓
-5단계  QC — 태그 없는 숫자 스캔, 구조 검사, 충돌지도·[R-] 테스트
+```mermaid
+flowchart TD
+    P0["0단계 — EM (/panel 스킬)<br/>리포트·컨텍스트를 읽고 태스킹 브리프 작성"]
+    P1["1단계 — research-desk 🔒 블로킹<br/>모든 주장을 검증·등급화 → 01-fact-base.md"]
+    subgraph P2["2단계 — 일곱 렌즈, 병렬 & 상호 비공개"]
+        direction LR
+        L1[market]
+        L2[commercial]
+        L3[corpfin]
+        L4[ops]
+        L5[org]
+        L6[tech]
+        L7[risk]
+    end
+    P2A["F-id만 인용 → lenses/*.md"]
+    P3["3단계 — red-team<br/>전체를 보는 첫 에이전트 → 02-red-team.md"]
+    P4["4단계 — partner-synthesis<br/>→ 03-conflict-map.md, 04-partner-synthesis.md"]
+    P5["5단계 — QC<br/>태그 없는 숫자 스캔, 구조 검사, 충돌지도·[R-] 테스트"]
+
+    P0 --> P1 --> P2 --> P2A --> P3 --> P4 --> P5
+    P3 -. "심각도 HIGH + 메울 수 있는 공백<br/>재검증 + 렌즈 재실행" .-> P1
+
+    style P1 fill:#f9d5d5,stroke:#c0392b
+    style P2 fill:#d5e8f9,stroke:#2980b9
 ```
 
 ### 왜 1단계가 막는가
@@ -104,6 +110,25 @@ Python 런타임에서는 `await`가, Claude Code에서는 EM의 단계 검사�
 **U 등급은 실패가 아니라 발견이다.** 리포트의 핵심 시장규모 수치가 교차 확인되지 않는다면, 그것은 그 리포트에 대해 중요한 사실을 말해준다 — 그리고 요약이었다면 삼켜버렸을 바로 그것이다.
 
 집행은 5단계에서 전부 기계적으로 이루어진다. 모든 렌즈 보고서, 레드팀 보고서, 종합 문서에 대해 세 가지 검사가 돈다. 증거 태그 없는 수치는 결함이고, 사실 베이스에 존재하지 않는 `[F-nnn]` 인용은 결함이며, 사실·컨텍스트 파일·산술 중 아무것도 제시하지 않는 `[EST: ...]`도 결함이다. 사실 베이스는 *정의의 출처*로 읽지 다른 보고서처럼 스캔하지 않는다 — 사실 베이스 자신의 숫자는 인용을 달지 않는 게 정상이기 때문이다.
+
+```mermaid
+flowchart LR
+    A["렌즈가 주장을 쓴다"] -->|"태그를 단다"| B{"어떤 태그?"}
+    B -->|"[F-nnn]"| C["사실 베이스 항목 인용"]
+    B -->|"[EST: 방법]"| D["F-참조 / C-경로 / 산술식 명시"]
+    B -->|"태그 없음"| E["untagged-quantity ✗"]
+    C --> F{"01-fact-base.md에<br/>F-nnn이 정의돼 있나?"}
+    F -->|"예"| G["QC 통과"]
+    F -->|"아니오"| H["dangling-fact-id ✗"]
+    D --> I{"재현 가능한 방법인가?"}
+    I -->|"예"| G
+    I -->|"아니오"| J["unreproducible-estimate ✗"]
+
+    style E fill:#f9d5d5,stroke:#c0392b
+    style H fill:#f9d5d5,stroke:#c0392b
+    style J fill:#f9d5d5,stroke:#c0392b
+    style G fill:#d5f9d5,stroke:#27ae60
+```
 
 이 중 두 번째가 가장 중요하다. 이게 없으면 **날조되거나 오타 난 F-ID가 다른 모든 검사에게는 진짜 인용과 구별되지 않고**, 일곱 렌즈를 거쳐 최종 권고까지 전파된다. 코드는 약 15줄이다.
 
@@ -165,6 +190,16 @@ panel/runners/
   registry.py            이름 → 클래스, 지연 임포트
   claude_agent_sdk.py     기본값 — claude_agent_sdk.query()를 감쌈
   mock.py                 네트워크·의존성 없음 — 정해진 응답 반환, 모든 호출 기록
+```
+
+```mermaid
+flowchart LR
+    PL["panel/pipeline.py"] --> IF["AgentRunner (인터페이스)<br/>run(agent_name, system_prompt, task,<br/>tools, model, cwd, max_budget_usd)"]
+    IF --> R1["claude_agent_sdk.py<br/>(기본값)"]
+    IF --> R2["mock.py<br/>(네트워크 없음, 테스트용)"]
+    IF -.->|"클래스 하나 작성,<br/>이름으로 등록"| R3["새 러너"]
+
+    style IF fill:#d5e8f9,stroke:#2980b9
 ```
 
 "API를 다른 걸로 바꿀 수도 있다"는 이 프로젝트에서 실제로 가까운 미래에 일어날 수 있는 일이지, 과설계할 가치가 있는 가상의 시나리오가 아니다. 이 분리는 구체적으로 세 가지를 얻는다.

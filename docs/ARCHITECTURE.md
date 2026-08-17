@@ -49,44 +49,30 @@ The Engagement Manager is the `/panel` skill itself rather than a subagent. It n
 
 ## The pipeline
 
-```
-  ┌─────────────────────────────────────────────────────────────┐
-  │ PHASE 0   Engagement Manager (the /panel skill)             │
-  │           reads report + context → writes 00-brief.md       │
-  └────────────────────────────┬────────────────────────────────┘
-                               ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ PHASE 1   research-desk                        [BLOCKING]   │
-  │           verifies every claim → 01-fact-base.md            │
-  │                                → 01-contradictions.md       │
-  └────────────────────────────┬────────────────────────────────┘
-                               ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ PHASE 2   seven lenses, PARALLEL and MUTUALLY BLIND         │
-  │  ┌────────┬────────┬────────┬────────┬────────┬─────┬─────┐ │
-  │  │ market │ comm'l │ corpfin│  ops   │  org   │ tech│ risk│ │
-  │  └────────┴────────┴────────┴────────┴────────┴─────┴─────┘ │
-  │           each cites F-ids only → lenses/*.md               │
-  └────────────────────────────┬────────────────────────────────┘
-                               ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ PHASE 3   red-team — first agent to see everything          │
-  │           attacks all seven → 02-red-team.md                │
-  │           HIGH finding with a closable gap ──┐              │
-  └────────────────────────────┬─────────────────┘              │
-                               │        re-verify + re-run lens │
-                               │◄───────────────────────────────┘
-                               ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ PHASE 4   partner-synthesis                                 │
-  │           → 03-conflict-map.md  (mechanical, no opinion)    │
-  │           → 04-partner-synthesis.md  (the deliverable)      │
-  └────────────────────────────┬────────────────────────────────┘
-                               ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │ PHASE 5   Engagement Manager QC — untagged-number scan,     │
-  │           structure check, conflict test, [R-] test         │
-  └─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    P0["Phase 0 — Engagement Manager (the /panel skill)<br/>reads report + context → writes 00-brief.md"]
+    P1["Phase 1 — research-desk 🔒 BLOCKING<br/>verifies every claim → 01-fact-base.md, 01-contradictions.md"]
+    subgraph P2["Phase 2 — seven lenses, PARALLEL & MUTUALLY BLIND"]
+        direction LR
+        L1[market]
+        L2["comm'l"]
+        L3[corpfin]
+        L4[ops]
+        L5[org]
+        L6[tech]
+        L7[risk]
+    end
+    P2A["each cites F-ids only → lenses/*.md"]
+    P3["Phase 3 — red-team<br/>first agent to see everything → 02-red-team.md"]
+    P4["Phase 4 — partner-synthesis<br/>→ 03-conflict-map.md, 04-partner-synthesis.md"]
+    P5["Phase 5 — Engagement Manager QC<br/>untagged-number scan, structure check, conflict test, [R-] test"]
+
+    P0 --> P1 --> P2 --> P2A --> P3 --> P4 --> P5
+    P3 -. "HIGH finding, closable gap<br/>re-verify + re-run lens" .-> P1
+
+    style P1 fill:#f9d5d5,stroke:#c0392b
+    style P2 fill:#d5e8f9,stroke:#2980b9
 ```
 
 ### Why Phase 1 blocks
@@ -116,6 +102,25 @@ The `[F-]` versus `[R-]` distinction does most of the work. Collapsing them is h
 Facts are graded A through D by provenance, plus `U` for unverified. A `U` grade is a finding, not a failure: when a report's central market-size figure cannot be corroborated, that tells you something important about the report.
 
 Enforcement is at Phase 5 and is mechanical throughout. Three checks run over every lens report, the red team's, and the synthesis: a quantity carrying no evidence tag is a defect; a cited `[F-nnn]` that no fact-base entry defines is a defect; and an `[EST: ...]` whose method names neither a fact, nor a context file, nor visible arithmetic is a defect. The fact base is read as a *source of definitions* rather than scanned as another report — its own numbers correctly carry no citations.
+
+```mermaid
+flowchart LR
+    A["Lens writes a claim"] -->|"tags it"| B{"Which tag?"}
+    B -->|"[F-nnn]"| C["cites fact-base entry"]
+    B -->|"[EST: method]"| D["names F-ref / C-path / arithmetic"]
+    B -->|"no tag"| E["untagged-quantity ✗"]
+    C --> F{"F-nnn defined in<br/>01-fact-base.md?"}
+    F -->|yes| G["passes QC"]
+    F -->|no| H["dangling-fact-id ✗"]
+    D --> I{"method reproducible?"}
+    I -->|yes| G
+    I -->|no| J["unreproducible-estimate ✗"]
+
+    style E fill:#f9d5d5,stroke:#c0392b
+    style H fill:#f9d5d5,stroke:#c0392b
+    style J fill:#f9d5d5,stroke:#c0392b
+    style G fill:#d5f9d5,stroke:#27ae60
+```
 
 The second of those is the one that matters most. Without it, a fabricated or mistyped fact id is indistinguishable from a real citation to every other check in the system, and propagates through seven lenses into the recommendation. It costs about fifteen lines.
 
@@ -186,6 +191,16 @@ panel/runners/
   registry.py            name -> class, lazy-imported
   claude_agent_sdk.py     the default -- wraps claude_agent_sdk.query()
   mock.py                 no network, no dependency -- canned responses, records every call
+```
+
+```mermaid
+flowchart LR
+    PL["panel/pipeline.py"] --> IF["AgentRunner (interface)<br/>run(agent_name, system_prompt, task,<br/>tools, model, cwd, max_budget_usd)"]
+    IF --> R1["claude_agent_sdk.py<br/>(default)"]
+    IF --> R2["mock.py<br/>(no network, tests)"]
+    IF -.->|"add a class,<br/>register a name"| R3["your runner"]
+
+    style IF fill:#d5e8f9,stroke:#2980b9
 ```
 
 This split exists because "the API might get swapped for a different one" is a real, near-term possibility for this project, not a hypothetical worth over-engineering for. Concretely, it buys three things:

@@ -41,8 +41,12 @@ Output lands in `reports/YYYY-MM-DD-<slug>/`. The deliverable is `04-partner-syn
 
 ## How it works
 
-```
-report → fact base → 7 blind parallel lenses → red team → Partner synthesis
+```mermaid
+flowchart LR
+    A[report] --> B["fact base<br/>(research-desk)"]
+    B --> C["7 blind lenses<br/>(parallel)"]
+    C --> D[red team]
+    D --> E["Partner<br/>synthesis"]
 ```
 
 The design turns on three choices:
