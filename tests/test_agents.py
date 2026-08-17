@@ -53,6 +53,28 @@ def test_model_defaults_to_inherit():
     assert parse_agent(text, Path("t.md")).model == "inherit"
 
 
+def test_unknown_frontmatter_key_rejected():
+    """Silent discard means a typo in `tools:` -- the key that enforces an
+    agent's capability boundary -- vanishes without a word."""
+    text = VALID.replace("tools: Read, Write, Grep", "tool: Read, Write, Grep")
+    with pytest.raises(AgentLoadError, match="unknown frontmatter key"):
+        parse_agent(text, Path("typo.md"))
+
+
+def test_skills_key_parsed_not_discarded():
+    text = VALID.replace("model: sonnet", "skills: market-sizing, cost-build\nmodel: sonnet")
+    assert parse_agent(text, Path("t.md")).skills == ["market-sizing", "cost-build"]
+
+
+def test_skills_accepts_yaml_list_form():
+    text = VALID.replace("model: sonnet", "skills:\n  - market-sizing\n  - cost-build\nmodel: sonnet")
+    assert parse_agent(text, Path("t.md")).skills == ["market-sizing", "cost-build"]
+
+
+def test_skills_defaults_empty():
+    assert parse_agent(VALID, Path("t.md")).skills == []
+
+
 # --------------------------------------------------------------------------
 # the real roster on disk
 # --------------------------------------------------------------------------

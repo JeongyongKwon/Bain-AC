@@ -15,7 +15,7 @@ API behind the panel does.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -36,8 +36,20 @@ _LANG_DIRECTIVE = {
 }
 
 
+KNOWN_FRONTMATTER_KEYS = frozenset({"name", "description", "tools", "skills", "model"})
+
+
 class AgentLoadError(RuntimeError):
     """Raised when an agent file is malformed -- fail loudly at startup."""
+
+
+def _as_list(raw: object) -> list[str]:
+    """Frontmatter lists may be written comma-separated or as a YAML list."""
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, str):
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    return [str(item).strip() for item in raw if str(item).strip()]
 
 
 @dataclass(frozen=True)
@@ -55,6 +67,7 @@ class LoadedAgent:
     tools: list[str]
     model: str
     source: Path
+    skills: list[str] = field(default_factory=list)
 
 
 def parse_agent(text: str, source: Path) -> LoadedAgent:
@@ -72,21 +85,26 @@ def parse_agent(text: str, source: Path) -> LoadedAgent:
         if not meta.get(key):
             raise AgentLoadError(f"{source}: frontmatter is missing required key {key!r}")
 
+    # Reject unknown keys rather than dropping them. Silent discard means a
+    # typo in `tools:` -- the field that enforces an agent's capability
+    # boundary -- vanishes without a word, and the agent runs with the
+    # runner's defaults instead of the restrictions its author intended.
+    unknown = sorted(set(meta) - KNOWN_FRONTMATTER_KEYS)
+    if unknown:
+        raise AgentLoadError(
+            f"{source}: unknown frontmatter key(s): {', '.join(unknown)}; "
+            f"expected any of {', '.join(sorted(KNOWN_FRONTMATTER_KEYS))}"
+        )
+
     if not body.strip():
         raise AgentLoadError(f"{source}: agent body is empty -- there is no prompt to run")
-
-    tools_raw = meta.get("tools", "")
-    tools = (
-        [t.strip() for t in tools_raw.split(",") if t.strip()]
-        if isinstance(tools_raw, str)
-        else list(tools_raw or [])
-    )
 
     return LoadedAgent(
         name=str(meta["name"]),
         description=str(meta["description"]),
         prompt=body.strip(),
-        tools=tools,
+        tools=_as_list(meta.get("tools")),
+        skills=_as_list(meta.get("skills")),
         model=str(meta.get("model", "inherit")),
         source=source,
     )

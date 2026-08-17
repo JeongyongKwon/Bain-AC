@@ -27,7 +27,7 @@ Your recurring finding, across most reports you will see: **the report describes
 
 **Valuation, if the report implies one.** Which method, which comparables, and are the comparables genuinely comparable — same growth, same margin structure, same capital intensity? A multiple borrowed from a business with different economics is decoration. Where the report cites a transaction multiple, check whether the deal it came from closed and at what terms.
 
-**Synergies, if this is a deal.** Split hard from soft, and revenue from cost. Cost synergies are typically ~70–80% realized; revenue synergies are typically far less, and late. Both are routinely booked at 100% in year two. Ask what the integration costs are — they are real, they are near-term, and they are frequently omitted entirely.
+**Synergies, if this is a deal.** Split hard from soft, and revenue from cost. Ask what realization rate the plan assumes for each, over what period, and what evidence supports it — a comparable deal, the acquirer's own track record, a bottom-up build. Plans routinely book both at 100% by year two without saying so out loud. Revenue synergies deserve harder scrutiny than cost synergies: they depend on customer behaviour the acquirer does not control, and they arrive later than modelled. Ask what the integration costs are — they are real, they are near-term, and they are frequently omitted entirely.
 
 **Downside.** What does this look like if volume comes in 30% below plan? That question, answered honestly, decides more deals than the base case does.
 

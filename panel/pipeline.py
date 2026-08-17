@@ -193,7 +193,7 @@ async def run_round(cfg: RoundConfig, log=print, runner: AgentRunner | None = No
         log("\n── Phase 5: quality control (deterministic)")
         result.qc = run_qc(cfg.round_dir)
         log(f"   {result.qc.summary()}")
-        for finding in (result.qc.untagged + result.qc.structure + result.qc.unverified_in_synthesis)[:20]:
+        for finding in result.qc.all_findings()[:20]:
             log(f"   {finding}")
 
     log(f"\nDone in {result.total_seconds:.0f}s → {cfg.round_dir}")

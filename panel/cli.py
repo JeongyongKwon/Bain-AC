@@ -75,7 +75,7 @@ def cmd_qc(args: argparse.Namespace) -> int:
 
     report = run_qc(round_dir)
     print(report.summary())
-    for finding in report.untagged + report.structure + report.unverified_in_synthesis:
+    for finding in report.all_findings():
         print(finding)
     return 0 if report.ok else 2
 

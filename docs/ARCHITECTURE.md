@@ -115,7 +115,11 @@ The `[F-]` versus `[R-]` distinction does most of the work. Collapsing them is h
 
 Facts are graded A through D by provenance, plus `U` for unverified. A `U` grade is a finding, not a failure: when a report's central market-size figure cannot be corroborated, that tells you something important about the report.
 
-Enforcement is at Phase 5, with a grep for numbers lacking tags. Mechanical, cheap, and it catches the drift that creeps in when an agent is writing fluently.
+Enforcement is at Phase 5 and is mechanical throughout. Three checks run over every lens report, the red team's, and the synthesis: a quantity carrying no evidence tag is a defect; a cited `[F-nnn]` that no fact-base entry defines is a defect; and an `[EST: ...]` whose method names neither a fact, nor a context file, nor visible arithmetic is a defect. The fact base is read as a *source of definitions* rather than scanned as another report — its own numbers correctly carry no citations.
+
+The second of those is the one that matters most. Without it, a fabricated or mistyped fact id is indistinguishable from a real citation to every other check in the system, and propagates through seven lenses into the recommendation. It costs about fifteen lines.
+
+What this still does not check is whether a fact-base entry's recorded URL resolves, or whether the verbatim quote is actually on that page. Grade A currently means "the Research Desk says it read the actual number" — an unfalsifiable first-person claim once the session ends. Closing that requires fetching the URL and confirming the quote, which is planned but not built.
 
 ---
 
