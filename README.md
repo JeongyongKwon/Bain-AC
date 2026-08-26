@@ -180,12 +180,34 @@ python plot.py --results results.csv --out chart.png
 | `--resume` | `results.csv` 에서 이미 끝난 (조건, 샘플) 은 건너뛴다 |
 | `--mock` | API 없이 파이프라인만 점검 (결과는 무의미, `model` 컬럼에 `mock:` prefix) |
 | `--env-file` | API 키를 읽을 `.env` 경로 (기본 `.env`) |
+| `--show-prompt` | API 호출 없이 **실제로 전송될 프롬프트만 출력**하고 종료 |
 
 동일 `--seed` 면 어떤 데이터셋/shot 조합을 실행하든 **같은 평가 샘플**이 뽑힌다.
 (데이터셋별 독립 RNG + 고정 `--pool-size`) 그래서 shot 조건을 나눠 돌려도 비교가 성립한다.
 
 few-shot 예시는 `1-shot ⊂ 4-shot ⊂ 16-shot` 이 되도록 같은 pool 의 prefix 를 쓴다.
 조건 사이에서 **바뀌는 것은 shot 수뿐이다.**
+
+---
+
+## 프롬프트 확인
+
+실제로 어떤 프롬프트가 나가는지는 API 호출 없이 그대로 볼 수 있다 (키도 필요 없다).
+
+```bash
+python run.py --dataset chestxray --data-dir data/chestxray14 --shots 0 4 --show-prompt
+python run.py --dataset sequence  --seq-csv data/seq.csv --shots 0 4 --show-prompt
+```
+
+프롬프트는 `run.py` 안에 있다.
+
+- 이미지: `load_chestxray()` 의 `instruction`
+- 염기서열: `load_sequence()` 의 `instruction`
+- few-shot 배치: `build_fewshot_contents()` — user/model 멀티턴으로 넣는다
+
+few-shot 예시의 답은 **데이터셋 원본 표기 그대로** 보여준다 (`Atelectasis`, `Pleural_Thickening`).
+정규화는 채점할 때만 하고, 예시가 소문자로 나가면 "정확히 이 문자열을 쓰라"는
+지시와 모순돼서 모델 행동에 영향을 준다.
 
 ---
 

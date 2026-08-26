@@ -92,13 +92,14 @@ def render_labels(labels) -> str:
 class Sample:
     """한 건의 평가 대상. kind 는 'image' 또는 'text'."""
 
-    __slots__ = ("sample_id", "kind", "payload", "gt")
+    __slots__ = ("sample_id", "kind", "payload", "gt", "gt_raw")
 
-    def __init__(self, sample_id, kind, payload, gt):
+    def __init__(self, sample_id, kind, payload, gt_raw):
         self.sample_id = sample_id
         self.kind = kind
-        self.payload = payload          # image: Path / text: str
-        self.gt = frozenset(gt)         # normalized label 집합
+        self.payload = payload                  # image: Path / text: str
+        self.gt_raw = list(gt_raw)              # 원본 표기 (few-shot 예시에 그대로 보여준다)
+        self.gt = frozenset(normalize_label(x) for x in gt_raw)   # 비교용 정규화 집합
 
 
 class Dataset:
@@ -137,11 +138,10 @@ def load_chestxray(args, rng) -> Dataset:
             path = images.get(name)
             if path is None:
                 continue
-            gt = {normalize_label(x) for x in (row.get("Finding Labels") or "").split("|")}
-            gt = {g for g in gt if g}
+            gt = [x.strip() for x in (row.get("Finding Labels") or "").split("|") if x.strip()]
             if not gt:
                 continue
-            if args.drop_no_finding and gt == {"no finding"}:
+            if args.drop_no_finding and [normalize_label(g) for g in gt] == ["no finding"]:
                 continue
             rows.append((row.get("Patient ID") or name, name, path, gt))
 
@@ -202,8 +202,7 @@ def load_sequence(args, rng) -> Dataset:
                 sys.exit(f"[error] '{col}' 컬럼이 {path} 에 없다. 있는 컬럼: {reader.fieldnames}")
         for i, row in enumerate(reader):
             seq = (row[args.seq_col] or "").strip().upper()
-            gt = {normalize_label(x) for x in re.split(r"[,|]", row[args.seq_label_col] or "")}
-            gt = {g for g in gt if g}
+            gt = [x.strip() for x in re.split(r"[,|]", row[args.seq_label_col] or "") if x.strip()]
             if not seq or not gt:
                 continue
             if args.seq_max_len and len(seq) > args.seq_max_len:
@@ -214,7 +213,7 @@ def load_sequence(args, rng) -> Dataset:
     if not rows:
         sys.exit("[error] 염기서열 CSV 에서 유효한 행을 읽지 못했다.")
 
-    labels = sorted({l for s in rows for l in s.gt})
+    labels = sorted({l for s in rows for l in s.gt_raw})
     rng.shuffle(rows)
 
     pool_rows, eval_rows = rows[: args.pool_size], rows[args.pool_size:]
@@ -248,7 +247,7 @@ def _stratified_pool(rows, k, labels, rng):
     """
     buckets = {l: [] for l in labels}
     for s in rows:
-        buckets[next(iter(s.gt))].append(s)
+        buckets[s.gt_raw[0]].append(s)
     for b in buckets.values():
         rng.shuffle(b)
     order, picked = list(labels), []
@@ -308,8 +307,44 @@ def build_fewshot_contents(shots, max_side: int) -> list:
     contents = []
     for s in shots:
         contents.append({"role": "user", "parts": sample_parts(s, max_side)})
-        contents.append({"role": "model", "parts": [{"text": render_labels(s.gt)}]})
+        contents.append({"role": "model", "parts": [{"text": ", ".join(s.gt_raw)}]})
     return contents
+
+
+def describe_part(part: dict, width: int = 100) -> str:
+    """프롬프트 확인용으로 part 하나를 사람이 읽을 수 있게 표현한다."""
+    if "text" in part:
+        text = part["text"]
+        if len(text) <= width * 3:
+            return text
+        return f"{text[:width * 2]}\n      ... (총 {len(text)}자 중 일부)"
+    blob = part.get("inlineData", {})
+    n_bytes = len(blob.get("data", "")) * 3 // 4
+    size = f"{n_bytes / 1024:.0f} KB" if n_bytes >= 1024 else f"{n_bytes} B"
+    return f"[IMAGE {blob.get('mimeType')} / {size}]"
+
+
+def show_prompt(args, dataset, shot_count):
+    """API 를 호출하지 않고, 실제로 전송될 프롬프트를 그대로 출력한다."""
+    prefix = build_fewshot_contents(dataset.shot_pool[:shot_count], args.image_max_side)
+    sample = dataset.eval_samples[0]
+    contents = prefix + [{"role": "user", "parts": sample_parts(sample, args.image_max_side)}]
+
+    bar = "=" * 78
+    print(f"\n{bar}\n  dataset={dataset.name}  shot={shot_count}  "
+          f"(turns={len(contents)}, 평가 샘플={sample.sample_id})\n{bar}")
+    print("\n--- systemInstruction ---")
+    print(dataset.instruction)
+    print("\n--- contents ---")
+    for i, turn in enumerate(contents):
+        tag = "few-shot 예시" if i < len(prefix) else ">>> 실제 질문"
+        print(f"\n  [{turn['role']}] {tag}")
+        for part in turn["parts"]:
+            body = describe_part(part).replace("\n", "\n      ")
+            print(f"      {body}")
+    print(f"\n  [model] <- 여기에 모델이 답한다.")
+    print(f"      정답: {', '.join(sample.gt_raw)}   "
+          f"(normalize 후 {{{render_labels(sample.gt)}}} 와 집합 비교)")
 
 
 # --------------------------------------------------------------------------
@@ -558,6 +593,8 @@ def parse_args(argv=None):
     p.add_argument("--max-api-failures", type=int, default=5,
                    help="연속 API 실패가 이만큼 쌓이면 그 샘플을 포기한다")
     p.add_argument("--mock", action="store_true", help="API 없이 파이프라인만 점검 (결과는 무의미)")
+    p.add_argument("--show-prompt", action="store_true",
+                   help="API 를 호출하지 않고 실제 전송될 프롬프트만 출력하고 종료")
     p.add_argument("--env-file", default=".env", help="API 키를 읽을 .env 경로")
 
     args = p.parse_args(argv)
@@ -570,7 +607,7 @@ def parse_args(argv=None):
     args.model_label = ("mock:" if args.mock else "") + args.model
     args.env_file_used = load_dotenv(args.env_file)
     args.api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
-    if not args.mock and not args.api_key:
+    if not args.mock and not args.show_prompt and not args.api_key:
         p.error("API 키가 없다. 다음 중 하나로 넣어라:\n"
                 "  export GEMINI_API_KEY=...            (셸 환경변수)\n"
                 f"  echo 'GEMINI_API_KEY=...' > {args.env_file}   (.env 파일, git 에 커밋되지 않음)")
@@ -592,6 +629,12 @@ def main(argv=None):
 
     out_path = Path(args.out)
     args._done = load_done(out_path, args.max_loops) if args.resume else set()
+
+    if args.show_prompt:
+        for dataset in datasets:
+            for shot in args.shots:
+                show_prompt(args, dataset, shot)
+        return
 
     total = sum(len(d.eval_samples) for d in datasets) * len(args.shots)
     if args.env_file_used:
