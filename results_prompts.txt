@@ -1,0 +1,79 @@
+command: run.py --mode escalate --dataset chestxray sequence --data-dir data/chestxray14 --chest-csv Data_Entry_2017_v2020.csv --drop-no-finding --seq-csv data/peptide_hla.csv --seq-id-col id --shots 0 1 4 16 --samples 25 --image-max-side 512 --rpm 12 --resume --out results.csv
+provider=gemini model=gemini-3.5-flash-lite mode=escalate thinking=auto shots=[0, 1, 4, 16] seed=0 pool_size=16 temperature=1.0
+
+======================================================================
+[chestxray] task=multilabel_classification eval=25 shot_pool=16
+======================================================================
+--- systemInstruction ---
+You are a classifier.
+You are given a frontal chest X-ray image. Assign the correct label(s).
+Allowed labels (use these exact strings):
+- Atelectasis
+- Cardiomegaly
+- Consolidation
+- Edema
+- Effusion
+- Emphysema
+- Fibrosis
+- Hernia
+- Infiltration
+- Mass
+- Nodule
+- Pleural_Thickening
+- Pneumonia
+- Pneumothorax
+- No Finding
+Rules:
+- Output ONLY the label(s), comma-separated, on a single line.
+- Output every label that applies.
+- Never output an explanation, a sentence, or markdown.
+
+--- few-shot 예시 (사다리 순서, 앞에서부터 사용) ---
+  1. <image 00000890_002.png> -> Infiltration, Mass, Nodule
+  2. <image 00001309_001.png> -> Atelectasis
+  3. <image 00000865_000.png> -> Pneumothorax
+  4. <image 00000865_002.png> -> Infiltration
+  5. <image 00000287_000.png> -> Cardiomegaly
+  6. <image 00000865_009.png> -> Atelectasis
+  7. <image 00000512_001.png> -> Cardiomegaly, Effusion
+  8. <image 00000074_000.png> -> Effusion
+  9. <image 00000865_001.png> -> Pneumothorax
+ 10. <image 00000034_000.png> -> Emphysema
+ 11. <image 00000865_011.png> -> Atelectasis
+ 12. <image 00000512_002.png> -> Cardiomegaly
+ 13. <image 00000566_002.png> -> Infiltration, Nodule
+ 14. <image 00001309_002.png> -> Effusion
+ 15. <image 00000566_001.png> -> Consolidation
+ 16. <image 00000900_001.png> -> Emphysema
+
+======================================================================
+[sequence] task=singlelabel_classification eval=25 shot_pool=16
+======================================================================
+--- systemInstruction ---
+You are a classifier.
+You are given a protein sequence written in the standard amino-acid alphabet, holding two parts separated by '|'. Assign the correct label(s).
+Allowed labels (use these exact strings):
+- binder
+- non_binder
+Rules:
+- Output ONLY the label(s), comma-separated, on a single line.
+- Output every label that applies.
+- Never output an explanation, a sentence, or markdown.
+
+--- few-shot 예시 (사다리 순서, 앞에서부터 사용) ---
+  1. YHTKYREISTNTYENIAYWRYNLYTWAELAYLWY|AEASVMTQL -> binder
+  2. YYAGYREKYRQTDVSNLYLWYDSYTWAAQAYTWY|VNPLLYLS -> non_binder
+  3. YYAGYREKYRQTDVNKLYLRYNFYTWAERAYTWY|MVPKGATMLVI -> binder
+  4. YTAMYQENVAHIDVDTLYIMYQDYTWAVLAYTWY|SRVAPHGRG -> non_binder
+  5. YHTEYREICAKTDEDTLYLNYHDYTWAVLAYEWY|NRVNHIIKK -> binder
+  6. YHTEYREICAKTDEDTLYLNYHDYTWAVLAYEWY|VSEDTRKGTVRYS -> non_binder
+  7. YFAMYQENVAHTDESIAYIMYQDYTWAVLAYTWY|KLYVPVKEY -> binder
+  8. YYAMYGENMASTYENIAYIVYDSYTWAVLAYLWY|RGMSDKSLRL -> non_binder
+  9. YYAGYREKYRQTDVSNLYIRYDYYTWAELAYLWY|YAFGRVFSGL -> binder
+ 10. YHTEYREICAKTDENIAYLNYHDYTWAVLAYEWY|CLNGRRCHYS -> non_binder
+ 11. YFAMYGEKVAHTHVDTLYVRYHYYTWAVLAYTWY|KLANIQCPCL -> binder
+ 12. YFAMYGEKVAHTHVDTLYLRYHYYTWAVWAYTWY|LIDSTPYRQ -> non_binder
+ 13. YFAMYGEKVAHTHVDTLYVRCHYYTWAVLAYTWY|RLPGGNEIGMV -> binder
+ 14. YSAMYEEKVAHTDENIAYLMFHYYTWAVQAYTGY|LYQPNFNTNF -> binder
+ 15. YFAMYQENVAQTDVDTLYIIYRDYTWAELAYTWY|STAAFFLLR -> binder
+ 16. YTAMYLQNVAQTDANTLYIMYRDYTWAVLAYTWY|QVHPDTGISSK -> binder

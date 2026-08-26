@@ -883,6 +883,24 @@ def main(argv=None):
         print(f"  - {d.name}: eval={len(d.eval_samples)} shot_pool={len(d.shot_pool)} "
               f"labels={len(d.labels)} task={d.task_type}")
 
+    # 어떤 프롬프트로 돌렸는지 결과 옆에 같이 남긴다.
+    # results.csv 만으로는 재현이 안 되고, 프롬프트가 바뀌면 결과 비교가 성립하지 않는다.
+    meta_path = out_path.with_name(out_path.stem + "_prompts.txt")
+    with open(meta_path, "w", encoding="utf-8") as meta:
+        meta.write(f"command: {' '.join(sys.argv)}\n")
+        meta.write(f"provider={args.provider} model={args.model} mode={args.mode} "
+                   f"thinking={args.thinking} shots={args.shots} seed={args.seed} "
+                   f"pool_size={args.pool_size} temperature={args.temperature}\n")
+        for d in datasets:
+            meta.write(f"\n{'=' * 70}\n[{d.name}] task={d.task_type} "
+                       f"eval={len(d.eval_samples)} shot_pool={len(d.shot_pool)}\n"
+                       f"{'=' * 70}\n--- systemInstruction ---\n{d.instruction}\n"
+                       f"\n--- few-shot 예시 (사다리 순서, 앞에서부터 사용) ---\n")
+            for i, sample in enumerate(d.shot_pool, 1):
+                shown = sample.payload if sample.kind == "text" else f"<image {sample.payload.name}>"
+                meta.write(f"{i:3}. {str(shown)[:90]} -> {', '.join(sample.gt_raw)}\n")
+    print(f"prompts -> {meta_path}")
+
     is_new = not out_path.exists() or out_path.stat().st_size == 0
     counter = [0]
     started = time.perf_counter()

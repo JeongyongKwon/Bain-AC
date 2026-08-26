@@ -18,13 +18,18 @@ few-shot 예시 수를 `0 / 1 / 4 / 16` 으로 늘릴 때
 ## 파일 구조
 
 ```
-README.md      이 문서
-run.py         실험 러너 (데이터 로딩 → few-shot 구성 → Gemini 호출 → Agent loop → CSV append)
-results.csv    호출 단위 raw execution log (별도 log 파일은 만들지 않는다)
-plot.py        results.csv 집계 → chart.png
-chart.png      결과 그래프 (plot.py 실행 시 생성)
-.gitignore     .env / data/ 를 커밋에서 제외
+README.md            이 문서
+run.py               실험 러너 (데이터 로딩 → few-shot 구성 → Gemini 호출 → Agent loop → CSV append)
+results.csv          호출 단위 raw execution log (별도 log 파일은 만들지 않는다)
+results_prompts.txt  그 실행에 실제로 쓰인 프롬프트 (run.py 가 자동 생성)
+plot.py              results.csv 집계 → chart.png
+chart.png            결과 그래프 (plot.py 실행 시 생성)
+.gitignore           .env / data/ 를 커밋에서 제외
 ```
+
+`run.py` 는 실행할 때마다 `<out>_prompts.txt` 를 같이 쓴다.
+systemInstruction 전문, few-shot 예시 목록, 실행 명령과 seed 가 들어간다.
+results.csv 만으로는 재현이 안 되고, 프롬프트가 바뀌면 결과 비교가 성립하지 않기 때문이다.
 
 데이터셋과 API 키는 레포에 넣지 않는다. 로컬에 `data/` 와 `.env` 로 두면 된다.
 
@@ -401,3 +406,36 @@ chestxray       0   50      3.42       8.11      1420       24      62.0
 chestxray       4   50      2.10       5.02      6180       21      88.0
 ...
 ```
+
+
+---
+
+## 실행 결과 (2026-08)
+
+`gemini-3.5-flash-lite`, escalate 모드, 데이터셋당 25 샘플.
+
+```
+              평균 횟수   평균 시간   평균 토큰   정답 도달
+chestxray       3.72     16.14s     24,903      16%
+sequence        2.04      5.45s        418      92%
+```
+
+의료영상이 염기서열보다 정답 도달에 **1.8배 많은 횟수, 3.0배 긴 시간, 60배 많은 토큰**을 쓴다.
+
+호출 1회당 input token:
+
+| | 0-shot | 1-shot | 4-shot | 16-shot | 예시 1개당 |
+|---|---|---|---|---|---|
+| chestxray | 1,231 | 2,329 | 5,612 | 18,747 | **1,095** (이미지 1장) |
+| sequence | 122 | 153 | 250 | 635 | **32** (44자 펩타이드) |
+
+few-shot 예시 하나의 비용이 **34배** 차이 난다. 이미지는 shot 을 올리는 것이 훨씬 비싸다.
+
+### 읽을 때 주의할 것
+
+- **`No Finding` 누수** — chest 는 `--drop-no-finding` 으로 평가셋에서 뺐지만
+  라벨 목록에는 남아 있어서, 93 콜 중 41 콜이 정답일 수 없는 `No Finding` 으로 갔다.
+  이 수치는 그 상태에서 나온 것이다.
+- **기준선** — 두 데이터셋 모두 상수 예측기 기준선을 확실히 넘지 못했다
+  (sequence +4.0%p, chest -12.0%p). 시간·토큰 비교는 정답 여부와 무관하므로 유효하지만,
+  "횟수" 배수는 과대평가일 수 있다.

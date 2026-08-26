@@ -1,1 +1,145 @@
 dataset,task_type,model,shot_count,seed,sample_id,loop_index,predicted,gt,correct,latency_ms,input_tokens,output_tokens,elapsed_s
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_06258,1,non binder,non binder,True,1168.6,125,3,1.169
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_12195,1,binder,binder,True,804.1,122,1,0.804
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_06820,1,binder,non binder,False,701.9,124,1,0.702
+sequence,singlelabel_classification,gemini-3.5-flash-lite,1,0,pep_06820,2,binder,non binder,False,845.8,155,1,1.548
+sequence,singlelabel_classification,gemini-3.5-flash-lite,4,0,pep_06820,3,non binder,non binder,True,1119.7,252,3,2.667
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_15787,1,binder,binder,True,990.3,121,1,0.99
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_26493,1,binder,binder,True,925.0,123,1,0.925
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_26509,1,binder,binder,True,782.7,123,1,0.783
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_31646,1,binder,non binder,False,803.7,123,1,0.804
+sequence,singlelabel_classification,gemini-3.5-flash-lite,1,0,pep_31646,2,binder,non binder,False,757.3,154,1,1.561
+sequence,singlelabel_classification,gemini-3.5-flash-lite,4,0,pep_31646,3,binder,non binder,False,867.7,251,1,2.429
+sequence,singlelabel_classification,gemini-3.5-flash-lite,16,0,pep_31646,4,non binder,non binder,True,848.7,636,3,3.277
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_51756,1,binder,non binder,False,818.1,122,1,0.818
+sequence,singlelabel_classification,gemini-3.5-flash-lite,1,0,pep_51756,2,binder,non binder,False,659.9,153,1,1.478
+sequence,singlelabel_classification,gemini-3.5-flash-lite,4,0,pep_51756,3,binder,non binder,False,929.7,250,1,2.408
+sequence,singlelabel_classification,gemini-3.5-flash-lite,16,0,pep_51756,4,binder,non binder,False,619.5,635,1,3.027
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_14559,1,binder,binder,True,1073.2,124,1,1.073
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_31229,1,binder,non binder,False,667.7,122,1,0.668
+sequence,singlelabel_classification,gemini-3.5-flash-lite,1,0,pep_31229,2,binder,non binder,False,52529.3,153,1,53.197
+sequence,singlelabel_classification,gemini-3.5-flash-lite,4,0,pep_31229,3,non binder,non binder,True,1212.1,250,3,54.409
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_38198,1,binder,binder,True,746.0,121,1,0.746
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_13563,1,binder,non binder,False,783.9,124,1,0.784
+sequence,singlelabel_classification,gemini-3.5-flash-lite,1,0,pep_13563,2,binder,non binder,False,1276.8,155,1,2.061
+sequence,singlelabel_classification,gemini-3.5-flash-lite,4,0,pep_13563,3,binder,non binder,False,937.8,252,1,2.998
+sequence,singlelabel_classification,gemini-3.5-flash-lite,16,0,pep_13563,4,non binder,non binder,True,978.0,637,3,3.976
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_28341,1,non binder,non binder,True,5194.5,122,3,5.195
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_01982,1,binder,binder,True,718.4,121,1,0.718
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_40360,1,binder,binder,True,8328.3,123,1,8.328
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_28114,1,binder,non binder,False,738.3,124,1,0.738
+sequence,singlelabel_classification,gemini-3.5-flash-lite,1,0,pep_28114,2,binder,non binder,False,789.6,155,1,1.528
+sequence,singlelabel_classification,gemini-3.5-flash-lite,4,0,pep_28114,3,non binder,non binder,True,678.2,252,3,2.206
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_00322,1,non binder,binder,False,1011.1,122,3,1.011
+sequence,singlelabel_classification,gemini-3.5-flash-lite,1,0,pep_00322,2,non binder,binder,False,766.7,153,3,1.778
+sequence,singlelabel_classification,gemini-3.5-flash-lite,4,0,pep_00322,3,binder,binder,True,845.7,250,1,2.624
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_47362,1,binder,binder,True,874.0,123,1,0.874
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_02103,1,binder,non binder,False,1083.7,122,1,1.084
+sequence,singlelabel_classification,gemini-3.5-flash-lite,1,0,pep_02103,2,binder,non binder,False,761.6,153,1,1.845
+sequence,singlelabel_classification,gemini-3.5-flash-lite,4,0,pep_02103,3,binder,non binder,False,984.2,250,1,2.829
+sequence,singlelabel_classification,gemini-3.5-flash-lite,16,0,pep_02103,4,non binder,non binder,True,1304.5,635,3,4.134
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_30602,1,binder,binder,True,833.6,123,1,0.834
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_27837,1,binder,binder,True,862.8,122,1,0.863
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_40325,1,binder,non binder,False,11928.5,124,1,11.929
+sequence,singlelabel_classification,gemini-3.5-flash-lite,1,0,pep_40325,2,binder,non binder,False,970.5,155,1,12.899
+sequence,singlelabel_classification,gemini-3.5-flash-lite,4,0,pep_40325,3,non binder,non binder,True,779.4,252,3,13.678
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_26267,1,non binder,non binder,True,975.4,122,3,0.975
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_40099,1,binder,non binder,False,659.6,121,1,0.66
+sequence,singlelabel_classification,gemini-3.5-flash-lite,1,0,pep_40099,2,binder,non binder,False,841.8,152,1,1.501
+sequence,singlelabel_classification,gemini-3.5-flash-lite,4,0,pep_40099,3,binder,non binder,False,814.2,249,1,2.316
+sequence,singlelabel_classification,gemini-3.5-flash-lite,16,0,pep_40099,4,binder,non binder,False,8635.7,634,1,10.951
+sequence,singlelabel_classification,gemini-3.5-flash-lite,0,0,pep_42809,1,binder,non binder,False,10120.1,122,1,10.12
+sequence,singlelabel_classification,gemini-3.5-flash-lite,1,0,pep_42809,2,non binder,non binder,True,783.7,153,3,10.904
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000032_044.png,1,"cardiomegaly, effusion, infiltration","cardiomegaly, edema",False,2703.1,1231,10,2.703
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000032_044.png,2,"atelectasis, cardiomegaly, consolidation, edema, effusion","cardiomegaly, edema",False,1736.2,2329,17,4.439
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000032_044.png,3,"cardiomegaly, effusion","cardiomegaly, edema",False,1499.8,5612,7,5.939
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000032_044.png,4,"cardiomegaly, effusion, pneumonia","cardiomegaly, edema",False,6084.5,18747,10,12.024
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000242_005.png,1,no finding,infiltration,False,2197.0,1231,2,2.197
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000242_005.png,2,no finding,infiltration,False,5794.6,2329,2,7.992
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000242_005.png,3,no finding,infiltration,False,2216.5,5612,2,10.208
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000242_005.png,4,no finding,infiltration,False,4010.4,18747,2,14.218
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000032_029.png,1,"edema, effusion",cardiomegaly,False,1381.3,1231,5,1.381
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000032_029.png,2,"atelectasis, cardiomegaly, consolidation, edema, effusion",cardiomegaly,False,1063.1,2329,17,2.444
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000032_029.png,3,"cardiomegaly, effusion",cardiomegaly,False,2952.1,5612,7,5.397
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000032_029.png,4,"cardiomegaly, effusion, infiltration",cardiomegaly,False,6016.9,18747,10,11.413
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00001307_000.png,1,no finding,atelectasis,False,1743.0,1231,2,1.743
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00001307_000.png,2,no finding,atelectasis,False,1672.5,2329,2,3.416
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00001307_000.png,3,no finding,atelectasis,False,1553.9,5612,2,4.969
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00001307_000.png,4,no finding,atelectasis,False,4703.9,18747,2,9.673
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000583_045.png,1,effusion,pneumonia,False,1507.6,1231,2,1.508
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000583_045.png,2,"atelectasis, effusion",pneumonia,False,1448.3,2329,7,2.956
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000583_045.png,3,effusion,pneumonia,False,2277.8,5612,2,5.234
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000583_045.png,4,effusion,pneumonia,False,4460.5,18747,2,9.694
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00001248_000.png,1,"effusion, pneumonia",effusion,False,2882.8,1231,5,2.883
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00001248_000.png,2,effusion,effusion,True,1697.8,2329,2,4.581
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00001085_001.png,1,"cardiomegaly, effusion, infiltration","fibrosis, infiltration, mass, pleural thickening",False,1271.1,1231,10,1.271
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00001085_001.png,2,"atelectasis, cardiomegaly, consolidation, edema, effusion","fibrosis, infiltration, mass, pleural thickening",False,1416.8,2329,17,2.688
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00001085_001.png,3,effusion,"fibrosis, infiltration, mass, pleural thickening",False,1755.4,5612,2,4.443
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00001085_001.png,4,"atelectasis, effusion","fibrosis, infiltration, mass, pleural thickening",False,5411.5,18747,7,9.855
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000756_004.png,1,no finding,nodule,False,1521.0,1231,2,1.521
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000756_004.png,2,no finding,nodule,False,1034.9,2329,2,2.556
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000756_004.png,3,no finding,nodule,False,1607.1,5612,2,4.163
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000756_004.png,4,atelectasis,nodule,False,3178.1,18747,4,7.341
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000963_004.png,1,no finding,pleural thickening,False,2573.5,1231,2,2.574
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000963_004.png,2,no finding,pleural thickening,False,1910.8,2329,2,4.484
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000963_004.png,3,pneumothorax,pleural thickening,False,2626.6,5612,4,7.111
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000963_004.png,4,pneumothorax,pleural thickening,False,3035.8,18747,4,10.147
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000013_036.png,1,"cardiomegaly, effusion, pneumothorax",pneumothorax,False,3607.7,1231,11,3.608
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000013_036.png,2,cardiomegaly,pneumothorax,False,1106.2,2329,4,4.714
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000013_036.png,3,no finding,pneumothorax,False,1955.4,5612,2,6.669
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000013_036.png,4,no finding,pneumothorax,False,3716.6,18747,2,10.386
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00001256_007.png,1,"consolidation, effusion","emphysema, infiltration, pleural thickening",False,1368.5,1231,6,1.368
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00001256_007.png,2,"consolidation, effusion, pneumonia","emphysema, infiltration, pleural thickening",False,2970.6,2329,9,4.339
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00001256_007.png,3,"consolidation, mass, pneumonia","emphysema, infiltration, pleural thickening",False,1635.9,5612,8,5.975
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00001256_007.png,4,"consolidation, mass","emphysema, infiltration, pleural thickening",False,5421.9,18747,5,11.397
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00001101_003.png,1,no finding,effusion,False,2513.0,1231,2,2.513
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00001101_003.png,2,no finding,effusion,False,919.4,2329,2,3.432
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00001101_003.png,3,no finding,effusion,False,94728.7,5612,2,98.161
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00001101_003.png,4,no finding,effusion,False,3276.0,18747,2,101.437
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000591_005.png,1,effusion,effusion,True,1181.5,1231,2,1.182
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000360_006.png,1,no finding,"atelectasis, effusion, emphysema, pleural thickening",False,2981.8,1231,2,2.982
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000360_006.png,2,no finding,"atelectasis, effusion, emphysema, pleural thickening",False,1592.7,2329,2,4.575
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000360_006.png,3,no finding,"atelectasis, effusion, emphysema, pleural thickening",False,2096.0,5612,2,6.671
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000360_006.png,4,atelectasis,"atelectasis, effusion, emphysema, pleural thickening",False,6597.0,18747,4,13.267
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000149_007.png,1,no finding,"fibrosis, infiltration",False,1636.1,1231,2,1.636
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000149_007.png,2,no finding,"fibrosis, infiltration",False,2481.0,2329,2,4.117
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000149_007.png,3,no finding,"fibrosis, infiltration",False,3205.0,5612,2,7.322
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000149_007.png,4,no finding,"fibrosis, infiltration",False,3289.0,18747,2,10.611
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000199_001.png,1,no finding,fibrosis,False,1680.2,1231,2,1.68
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000199_001.png,2,no finding,fibrosis,False,1181.1,2329,2,2.861
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000199_001.png,3,no finding,fibrosis,False,1264.6,5612,2,4.126
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000199_001.png,4,infiltration,fibrosis,False,5460.0,18747,2,9.586
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000499_009.png,1,no finding,"consolidation, mass",False,1789.6,1231,2,1.79
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000499_009.png,2,no finding,"consolidation, mass",False,1435.6,2329,2,3.225
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000499_009.png,3,no finding,"consolidation, mass",False,1159.6,5612,2,4.385
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000499_009.png,4,atelectasis,"consolidation, mass",False,4048.6,18747,4,8.433
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000361_000.png,1,no finding,nodule,False,2273.8,1231,2,2.274
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000361_000.png,2,"cardiomegaly, effusion",nodule,False,2408.8,2329,7,4.683
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000361_000.png,3,no finding,nodule,False,2713.7,5612,2,7.396
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000361_000.png,4,no finding,nodule,False,3723.8,18747,2,11.12
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000042_006.png,1,no finding,infiltration,False,2211.3,1231,2,2.211
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000042_006.png,2,"atelectasis, infiltration",infiltration,False,1576.6,2329,7,3.788
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000042_006.png,3,no finding,infiltration,False,2738.5,5612,2,6.526
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000042_006.png,4,emphysema,infiltration,False,3852.9,18747,2,10.379
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000200_000.png,1,cardiomegaly,nodule,False,2205.5,1231,4,2.205
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000200_000.png,2,cardiomegaly,nodule,False,1133.9,2329,4,3.339
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000200_000.png,3,cardiomegaly,nodule,False,2832.7,5612,4,6.172
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000200_000.png,4,cardiomegaly,nodule,False,3483.6,18747,4,9.656
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000381_000.png,1,"atelectasis, cardiomegaly, consolidation, edema, effusion","emphysema, infiltration",False,1587.2,1231,17,1.587
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000381_000.png,2,"atelectasis, cardiomegaly, consolidation, edema, effusion","emphysema, infiltration",False,2075.5,2329,17,3.663
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000381_000.png,3,"cardiomegaly, effusion","emphysema, infiltration",False,2136.7,5612,7,5.799
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000381_000.png,4,"cardiomegaly, effusion, pneumonia","emphysema, infiltration",False,3269.5,18747,10,9.069
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000591_018.png,1,"effusion, pneumothorax",effusion,False,11003.8,1231,6,11.004
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000591_018.png,2,effusion,effusion,True,37942.5,2329,2,48.946
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000459_043.png,1,"atelectasis, edema, effusion",edema,False,2686.8,1231,10,2.687
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000459_043.png,2,"atelectasis, consolidation, edema, effusion, infiltration, pneumonia",edema,False,1793.6,2329,19,4.48
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000459_043.png,3,"edema, infiltration",edema,False,1465.8,5612,5,5.946
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000459_043.png,4,edema,edema,True,3667.5,18747,2,9.614
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000467_007.png,1,"atelectasis, consolidation, edema, effusion",infiltration,False,11627.4,1231,13,11.627
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000467_007.png,2,"atelectasis, consolidation, edema, effusion",infiltration,False,2211.3,2329,13,13.839
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000467_007.png,3,"effusion, infiltration",infiltration,False,2945.7,5612,5,16.784
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000467_007.png,4,"atelectasis, edema, effusion",infiltration,False,4267.9,18747,10,21.052
+chestxray,multilabel_classification,gemini-3.5-flash-lite,0,0,00000316_001.png,1,no finding,fibrosis,False,7175.2,1231,2,7.175
+chestxray,multilabel_classification,gemini-3.5-flash-lite,1,0,00000316_001.png,2,no finding,fibrosis,False,3485.4,2329,2,10.661
+chestxray,multilabel_classification,gemini-3.5-flash-lite,4,0,00000316_001.png,3,no finding,fibrosis,False,5689.1,5612,2,16.35
+chestxray,multilabel_classification,gemini-3.5-flash-lite,16,0,00000316_001.png,4,no finding,fibrosis,False,12091.1,18747,2,28.441
