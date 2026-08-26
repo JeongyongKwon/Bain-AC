@@ -317,19 +317,35 @@ def build_fewshot_contents(shots, max_side: int) -> list:
 # --------------------------------------------------------------------------
 
 class CallResult:
-    __slots__ = ("text", "input_tokens", "output_tokens", "latency_ms", "error")
+    __slots__ = ("text", "input_tokens", "output_tokens", "latency_ms", "error", "transport")
 
-    def __init__(self, text="", input_tokens="", output_tokens="", latency_ms=0.0, error=""):
+    def __init__(self, text="", input_tokens="", output_tokens="", latency_ms=0.0, error="",
+                 transport=False):
         self.text = text
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.latency_ms = latency_ms
         self.error = error
+        self.transport = transport   # True 면 모델 응답을 못 받은 것 (loop 로 세지 않는다)
 
 
 def _flatten(text: str, limit: int) -> str:
     """CSV 한 칸에 들어가도록 에러 메시지를 한 줄로 줄인다."""
     return re.sub(r"\s+", " ", text).strip()[:limit]
+
+
+_RETRY_DELAY = re.compile(r'"retryDelay"\s*:\s*"([0-9.]+)s"')
+
+
+def _retry_delay(body: str, headers, fallback: float) -> float:
+    """429 응답이 알려주는 대기 시간을 쓴다. 없으면 지수 백오프."""
+    match = _RETRY_DELAY.search(body)
+    if match:
+        return min(float(match.group(1)) + 1.0, 60.0)
+    header = getattr(headers, "get", lambda _k: None)("Retry-After")
+    if header and header.isdigit():
+        return min(float(header) + 1.0, 60.0)
+    return fallback
 
 
 def call_gemini(args, contents, instruction) -> CallResult:
@@ -361,17 +377,18 @@ def call_gemini(args, contents, instruction) -> CallResult:
             latency_ms = (time.perf_counter() - started) * 1000.0
             return _parse_response(raw, latency_ms)
         except urllib.error.HTTPError as exc:
-            detail = _flatten(exc.read().decode("utf-8", "replace"), 200)
-            last_error = f"HTTP {exc.code}: {detail}"
+            body = exc.read().decode("utf-8", "replace")
+            last_error = f"HTTP {exc.code}: {_flatten(body, 200)}"
             retryable = exc.code in (408, 429, 500, 502, 503, 504)
+            wait = _retry_delay(body, exc.headers, float(2 ** attempt))
         except Exception as exc:                     # timeout / 네트워크 오류
             last_error = _flatten(f"{type(exc).__name__}: {exc}", 200)
-            retryable = True
+            retryable, wait = True, float(2 ** attempt)
         if not retryable or attempt == args.max_retries:
             break
-        time.sleep(2 ** attempt)                     # transport 재시도는 loop 로 세지 않는다
+        time.sleep(wait)
 
-    return CallResult(latency_ms=0.0, error=last_error)
+    return CallResult(latency_ms=0.0, error=last_error, transport=True)
 
 
 def _parse_response(raw: dict, latency_ms: float) -> CallResult:
@@ -414,14 +431,22 @@ def run_condition(args, dataset, shot_count, writer, fh, counter, total):
 
         contents = prefix + [{"role": "user", "parts": sample_parts(sample, args.image_max_side)}]
         elapsed_s = 0.0
+        loop_index, api_failures = 0, 0
 
-        for loop_index in range(1, args.max_loops + 1):
+        while loop_index < args.max_loops:
             result = call_gemini(args, contents, dataset.instruction)
             elapsed_s += result.latency_ms / 1000.0
 
-            if result.error and not result.text.strip():
+            if result.transport:
+                # 모델이 응답을 못 준 것(429, 타임아웃 등)은 오답이 아니다.
+                # loop_index=0 으로 기록만 남기고 loop 예산을 쓰지 않는다.
+                api_failures += 1
+                predicted, correct = f"API_FAILURE: {result.error}", False
+            elif result.error and not result.text.strip():
+                loop_index, api_failures = loop_index + 1, 0
                 predicted, correct = f"ERROR: {result.error}", False
             else:
+                loop_index, api_failures = loop_index + 1, 0
                 pred = normalize_answer(result.text)
                 predicted, correct = render_labels(pred), pred == sample.gt
 
@@ -432,7 +457,7 @@ def run_condition(args, dataset, shot_count, writer, fh, counter, total):
                 "shot_count": shot_count,
                 "seed": args.seed,
                 "sample_id": sample.sample_id,
-                "loop_index": loop_index,
+                "loop_index": 0 if result.transport else loop_index,
                 "predicted": predicted,
                 "gt": render_labels(sample.gt),
                 "correct": correct,
@@ -444,10 +469,13 @@ def run_condition(args, dataset, shot_count, writer, fh, counter, total):
             fh.flush()                              # 중간에 죽어도 여기까지는 남는다
 
             print(f"[{counter[0]}/{total}] dataset={dataset.name} shot={shot_count} "
-                  f"sample={sample.sample_id} loop={loop_index} correct={correct}"
-                  + (f" | {predicted[:60]}" if not correct else ""))
+                  f"sample={sample.sample_id} loop={'-' if result.transport else loop_index} "
+                  f"correct={correct}" + (f" | {predicted[:60]}" if not correct else ""))
 
             if correct:
+                break
+            if result.transport and api_failures >= args.max_api_failures:
+                print(f"  [give up] API 실패 {api_failures}회 연속 -> 이 샘플은 건너뛴다")
                 break
             if args.sleep:
                 time.sleep(args.sleep)
@@ -461,7 +489,8 @@ def load_done(path: Path, max_loops: int) -> set:
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             key = (row["dataset"], row["model"], row["shot_count"], row["seed"], row["sample_id"])
-            if row["correct"] == "True" or int(row["loop_index"]) >= max_loops:
+            loop_index = int(row["loop_index"])
+            if row["correct"] == "True" or (loop_index and loop_index >= max_loops):
                 done.add(key)
     return done
 
@@ -495,7 +524,7 @@ def parse_args(argv=None):
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dataset", nargs="+", required=True, choices=["chestxray", "sequence"],
                    help="실행할 데이터셋")
-    p.add_argument("--model", default="gemini-2.5-flash", help="Gemini 멀티모달 모델 이름")
+    p.add_argument("--model", default="gemini-3.6-flash", help="Gemini 멀티모달 모델 이름")
     p.add_argument("--shots", type=int, nargs="+", default=[0, 1, 4, 16], help="few-shot 예시 개수")
     p.add_argument("--samples", type=int, default=25, help="데이터셋당 평가 샘플 수")
     p.add_argument("--max-loops", type=int, default=5, help="샘플당 최대 Agent loop 횟수")
@@ -526,6 +555,8 @@ def parse_args(argv=None):
     p.add_argument("--timeout", type=float, default=120.0)
     p.add_argument("--max-retries", type=int, default=3, help="전송 실패 재시도 (loop 로 세지 않음)")
     p.add_argument("--sleep", type=float, default=0.0, help="호출 사이 대기 (rate limit 용)")
+    p.add_argument("--max-api-failures", type=int, default=5,
+                   help="연속 API 실패가 이만큼 쌓이면 그 샘플을 포기한다")
     p.add_argument("--mock", action="store_true", help="API 없이 파이프라인만 점검 (결과는 무의미)")
     p.add_argument("--env-file", default=".env", help="API 키를 읽을 .env 경로")
 

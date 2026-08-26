@@ -152,7 +152,7 @@ data/seq.csv
 # 두 데이터셋을 한 번에
 python run.py \
   --dataset chestxray sequence \
-  --model gemini-2.5-flash \
+  --model gemini-3.6-flash \
   --data-dir data/chestxray14 \
   --seq-csv data/seq.csv --seq-id-col id \
   --shots 0 1 4 16 \
@@ -168,7 +168,7 @@ python plot.py --results results.csv --out chart.png
 
 | 옵션 | 설명 |
 |---|---|
-| `--model` | Gemini 멀티모달 모델 이름 (두 데이터셋에 동일 적용) |
+| `--model` | Gemini 멀티모달 모델 이름 (두 데이터셋에 동일 적용, 기본 `gemini-3.6-flash`) |
 | `--shots` | few-shot 예시 개수 목록 (기본 `0 1 4 16`) |
 | `--samples` | 데이터셋당 평가 샘플 수 |
 | `--max-loops` | 샘플당 최대 Agent loop 횟수 |
@@ -176,6 +176,7 @@ python plot.py --results results.csv --out chart.png
 | `--temperature` | 기본 1.0 |
 | `--thinking-budget` | Gemini 2.5 계열의 thinking 토큰 예산 (`0` 이면 비활성) |
 | `--sleep` | 호출 간 대기 (rate limit 대응) |
+| `--max-api-failures` | 연속 API 실패가 이만큼 쌓이면 그 샘플을 포기 (기본 5) |
 | `--resume` | `results.csv` 에서 이미 끝난 (조건, 샘플) 은 건너뛴다 |
 | `--mock` | API 없이 파이프라인만 점검 (결과는 무의미, `model` 컬럼에 `mock:` prefix) |
 | `--env-file` | API 키를 읽을 `.env` 경로 (기본 `.env`) |
@@ -201,8 +202,24 @@ loop 안에서 **하지 않는 것**: prompt 수정 ❌ / shot 변경 ❌ / 힌�
 고정된 task 를 정답이 나올 때까지 반복할 뿐이다. 이전 loop 의 오답도 프롬프트에 넣지 않는다.
 
 - `--temperature 0` 이면 매 loop 가 같은 응답이 되어 loop 가 의미를 잃는다. 기본값 1.0 을 권장한다.
-- HTTP 429/5xx/타임아웃에 대한 전송 재시도는 **loop 로 세지 않는다** (`--max-retries`).
-  재시도까지 실패하면 그 호출은 오답 loop 1회로 기록되고 `predicted` 에 `ERROR: ...` 가 남는다.
+- HTTP 429/5xx/타임아웃은 **loop 로 세지 않는다.** 모델이 답을 준 게 아니라 호출 자체가 실패한 것이므로
+  오답으로 처리하면 loop count 지표가 오염된다.
+  - 먼저 `--max-retries` 만큼 재시도한다 (429 응답이 알려주는 `retryDelay` 를 존중, 최대 60초).
+  - 그래도 실패하면 `loop_index=0`, `predicted=API_FAILURE: ...` 로 **기록만 남기고** loop 예산을 쓰지 않는다.
+  - 연속 실패가 `--max-api-failures`(기본 5) 를 넘으면 그 샘플을 포기한다.
+  - `plot.py` 는 `loop_index=0` 행을 집계에서 제외한다.
+- 모델이 응답은 했는데 내용이 비었거나 차단된 경우는 **오답 loop 1회**로 센다 (`ERROR: ...`).
+
+### rate limit
+
+무료 tier 는 분당/일일 quota 가 빡빡해서 429 가 자주 난다. 실험 시간의 대부분이 대기가 될 수 있다.
+
+```bash
+--sleep 2        # 호출 사이 2초 대기
+--samples 20     # 샘플 수를 줄여서 시작
+```
+
+quota 를 다 쓰면 `retryDelay` 가 길게 돌아오고 그만큼 대기한다. 규모를 키우려면 유료 tier 가 필요하다.
 
 ---
 
@@ -243,8 +260,8 @@ API 호출이 끝날 때마다 즉시 append + flush 한다. 중간에 프로세
 | `shot_count` | few-shot 예시 개수 |
 | `seed` | 샘플링 seed |
 | `sample_id` | 이미지 파일명 또는 서열 ID |
-| `loop_index` | 이 샘플의 몇 번째 loop 인가 (1부터) |
-| `predicted` | 정규화된 예측 label 집합 (실패 시 `ERROR: ...`) |
+| `loop_index` | 이 샘플의 몇 번째 loop 인가 (1부터). **`0` 은 API 실패**(429/타임아웃) 기록이며 loop 로 세지 않는다 |
+| `predicted` | 정규화된 예측 label 집합. 모델이 이상하게 답한 경우 `ERROR: ...`, API 자체가 실패한 경우 `API_FAILURE: ...` |
 | `gt` | 정규화된 정답 label 집합 |
 | `correct` | `True` / `False` |
 | `latency_ms` | 이번 호출 1회의 응답 시간 |
@@ -265,6 +282,8 @@ API 호출이 끝날 때마다 즉시 append + flush 한다. 중간에 프로세
 ## 지표
 
 `plot.py` 가 (dataset, shot_count) 단위로 집계한다.
+
+`loop_index=0` (API 실패) 행은 집계에서 빠진다.
 
 1. **Average loop count** — 메인 지표. 샘플별 `max(loop_index)` 의 평균.
    최대 loop 안에 못 맞춘 샘플은 `max_loops` 로 잘린 값(censored)이 들어가므로 success rate 와 함께 읽어야 한다.

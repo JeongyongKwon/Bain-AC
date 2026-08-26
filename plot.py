@@ -31,6 +31,10 @@ def load_samples(path):
                                       "success": False})
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
+            # loop_index=0 은 모델 응답을 못 받은 API 실패(429/타임아웃)다.
+            # 오답이 아니므로 집계에서 제외한다.
+            if int(row["loop_index"]) == 0:
+                continue
             key = (row["dataset"], int(row["shot_count"]), row["seed"], row["sample_id"])
             rec = per_sample[key]
             rec["loops"] = max(rec["loops"], int(row["loop_index"]))
