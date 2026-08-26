@@ -383,6 +383,15 @@ def _retry_delay(body: str, headers, fallback: float) -> float:
     return fallback
 
 
+FATAL_HTTP = (400, 401, 403, 404)
+
+
+def fatal(message: str):
+    """모델명 오타·키 오류처럼 재시도해도 소용없는 실패는 즉시 중단한다."""
+    sys.exit(f"\n[fatal] {message}\n"
+             "        재시도해도 같은 결과라 실험을 중단한다. 설정을 고치고 다시 실행해라.")
+
+
 _last_call_at = [0.0]
 
 
@@ -398,9 +407,6 @@ def throttle(args):
 
 
 def call_gemini(args, contents, instruction) -> CallResult:
-    if args.mock:
-        return _mock_call(args)
-
     body = {
         "contents": contents,
         "systemInstruction": {"parts": [{"text": instruction}]},
@@ -409,8 +415,9 @@ def call_gemini(args, contents, instruction) -> CallResult:
             "maxOutputTokens": args.max_output_tokens,
         },
     }
-    if args.thinking_budget is not None:
-        body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": args.thinking_budget}
+    budget = 0 if args.thinking == "off" else args.thinking_budget
+    if budget is not None:
+        body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": budget}
 
     payload = json.dumps(body).encode("utf-8")
     url = API_URL.format(model=args.model)
@@ -428,6 +435,8 @@ def call_gemini(args, contents, instruction) -> CallResult:
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", "replace")
             last_error = f"HTTP {exc.code}: {_flatten(body, 200)}"
+            if exc.code in FATAL_HTTP:
+                fatal(f"Gemini {last_error}")
             retryable = exc.code in (408, 429, 500, 502, 503, 504)
             wait = _retry_delay(body, exc.headers, float(2 ** attempt))
         except Exception as exc:                     # timeout / 네트워크 오류
@@ -454,6 +463,88 @@ def _parse_response(raw: dict, latency_ms: float) -> CallResult:
     return CallResult(text, in_tok, out_tok, latency_ms, error)
 
 
+def to_anthropic_messages(contents: list) -> list:
+    """Gemini contents 를 Anthropic messages 로 옮긴다 (샘플당 한 번만 호출한다)."""
+    messages = []
+    for turn in contents:
+        blocks = []
+        for part in turn["parts"]:
+            if "text" in part:
+                blocks.append({"type": "text", "text": part["text"]})
+            else:
+                blob = part["inlineData"]
+                blocks.append({"type": "image", "source": {
+                    "type": "base64",
+                    "media_type": blob["mimeType"],
+                    "data": blob["data"],
+                }})
+        messages.append({
+            "role": "assistant" if turn["role"] == "model" else "user",
+            "content": blocks,
+        })
+    return messages
+
+
+def _anthropic_client(args):
+    if getattr(args, "_client", None) is None:
+        try:
+            import anthropic
+        except ImportError:
+            sys.exit("[error] Anthropic 백엔드에는 SDK 가 필요하다: pip install anthropic")
+        args._anthropic = anthropic
+        args._client = anthropic.Anthropic(api_key=args.api_key, timeout=args.timeout,
+                                           max_retries=args.max_retries)
+    return args._client
+
+
+def call_anthropic(args, messages, instruction) -> CallResult:
+    """Claude 로 같은 실험을 돌린다. SDK 가 429/5xx 재시도를 처리한다."""
+    client = _anthropic_client(args)
+    anthropic = args._anthropic
+
+    kwargs = {
+        "model": args.model,
+        "max_tokens": args.max_output_tokens,
+        "system": instruction,
+        "messages": messages,
+    }
+    if args.thinking == "off":
+        kwargs["thinking"] = {"type": "disabled"}
+    # temperature 는 Sonnet 5 등 최신 모델에서 제거되어 보내면 400 이 난다.
+
+    started = time.perf_counter()
+    try:
+        resp = client.messages.create(**kwargs)
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError,
+            anthropic.NotFoundError, anthropic.BadRequestError) as exc:
+        fatal(f"Anthropic {type(exc).__name__}: {_flatten(str(exc), 300)}")
+    except Exception as exc:                        # rate limit / 5xx / 네트워크
+        return CallResult(latency_ms=0.0, transport=True,
+                          error=_flatten(f"{type(exc).__name__}: {exc}", 200))
+
+    latency_ms = (time.perf_counter() - started) * 1000.0
+    text = "".join(b.text for b in resp.content if b.type == "text")
+    in_tok, out_tok = resp.usage.input_tokens, resp.usage.output_tokens
+    if resp.stop_reason == "refusal":
+        detail = getattr(resp.stop_details, "category", None)
+        return CallResult("", in_tok, out_tok, latency_ms, f"refusal: {detail}")
+    error = "" if text.strip() else f"empty text (stop_reason={resp.stop_reason})"
+    return CallResult(text, in_tok, out_tok, latency_ms, error)
+
+
+def build_payload(args, contents):
+    """provider 별 요청 형태로 한 번만 변환해 두고 loop 마다 재사용한다."""
+    return to_anthropic_messages(contents) if args.provider == "anthropic" else contents
+
+
+def call_model(args, payload, instruction) -> CallResult:
+    if args.mock:
+        return _mock_call(args)
+    if args.provider == "anthropic":
+        return call_anthropic(args, payload, instruction)
+    return call_gemini(args, payload, instruction)
+
+
 def _mock_call(args) -> CallResult:
     """파이프라인 점검용. label set 에서 균일 랜덤으로 뽑으므로 shot 효과를 흉내내지 않는다."""
     time.sleep(0.01)
@@ -478,13 +569,14 @@ def run_condition(args, dataset, shot_count, writer, fh, counter, total):
                   f"shot={shot_count} sample={sample.sample_id}")
             continue
 
-        contents = prefix + [{"role": "user", "parts": sample_parts(sample, args.image_max_side)}]
+        payload = build_payload(args, prefix + [
+            {"role": "user", "parts": sample_parts(sample, args.image_max_side)}])
         elapsed_s = 0.0
         loop_index, api_failures = 0, 0
 
         while loop_index < args.max_loops:
             throttle(args)
-            result = call_gemini(args, contents, dataset.instruction)
+            result = call_model(args, payload, dataset.instruction)
             elapsed_s += result.latency_ms / 1000.0
 
             if result.transport:
@@ -572,7 +664,10 @@ def parse_args(argv=None):
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dataset", nargs="+", required=True, choices=["chestxray", "sequence"],
                    help="실행할 데이터셋")
-    p.add_argument("--model", default="gemini-3.5-flash-lite", help="Gemini 멀티모달 모델 이름")
+    p.add_argument("--model", default="gemini-3.5-flash-lite",
+                   help="멀티모달 모델 이름. claude-* 를 주면 Anthropic 백엔드로 자동 전환된다")
+    p.add_argument("--provider", choices=["auto", "gemini", "anthropic"], default="auto",
+                   help="auto = 모델 이름으로 판단 (claude-* -> anthropic)")
     p.add_argument("--shots", type=int, nargs="+", default=[0, 1, 4, 16], help="few-shot 예시 개수")
     p.add_argument("--samples", type=int, default=25, help="데이터셋당 평가 샘플 수")
     p.add_argument("--max-loops", type=int, default=5, help="샘플당 최대 Agent loop 횟수")
@@ -596,10 +691,14 @@ def parse_args(argv=None):
     p.add_argument("--seq-max-len", type=int, default=0, help="염기서열 최대 길이 (0=자르지 않음)")
 
     p.add_argument("--temperature", type=float, default=1.0,
-                   help="0 이면 매 loop 가 같은 응답이 되어 loop 가 의미를 잃는다")
-    p.add_argument("--max-output-tokens", type=int, default=256)
+                   help="Gemini 전용. 0 이면 매 loop 가 같은 응답이 되어 loop 가 의미를 잃는다. "
+                        "Claude 최신 모델은 temperature 자체가 없어서 무시된다")
+    p.add_argument("--max-output-tokens", type=int, default=2048,
+                   help="thinking 이 켜져 있으면 여기서 thinking 토큰도 나간다. 너무 낮으면 빈 응답이 된다")
+    p.add_argument("--thinking", choices=["auto", "off"], default="auto",
+                   help="auto = 모델 기본값, off = thinking 비활성 (비용/지연 감소)")
     p.add_argument("--thinking-budget", type=int, default=None,
-                   help="Gemini 2.5 계열 thinking 토큰 예산 (0=비활성)")
+                   help="Gemini thinking 토큰 예산 (--thinking auto 일 때만 적용)")
     p.add_argument("--timeout", type=float, default=120.0)
     p.add_argument("--max-retries", type=int, default=3, help="전송 실패 재시도 (loop 로 세지 않음)")
     p.add_argument("--sleep", type=float, default=0.0, help="호출 사이 최소 대기 (초)")
@@ -621,11 +720,24 @@ def parse_args(argv=None):
         p.error("--dataset sequence 에는 --seq-csv 가 필요하다")
     args.model_label = ("mock:" if args.mock else "") + args.model
     args.env_file_used = load_dotenv(args.env_file)
-    args.api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+    args._client = None
+
+    if args.provider == "auto":
+        args.provider = "anthropic" if args.model.startswith("claude") else "gemini"
+    if args.provider == "anthropic":
+        key_names = ("ANTHROPIC_API_KEY",)
+    else:
+        key_names = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    args.api_key = next((os.environ[k] for k in key_names if os.environ.get(k)), "")
+
     if not args.mock and not args.show_prompt and not args.api_key:
-        p.error("API 키가 없다. 다음 중 하나로 넣어라:\n"
-                "  export GEMINI_API_KEY=...            (셸 환경변수)\n"
-                f"  echo 'GEMINI_API_KEY=...' > {args.env_file}   (.env 파일, git 에 커밋되지 않음)")
+        primary = key_names[0]
+        p.error(f"{args.provider} 백엔드에 필요한 API 키가 없다. 다음 중 하나로 넣어라:\n"
+                f"  export {primary}=...            (셸 환경변수)\n"
+                f"  echo '{primary}=...' > {args.env_file}   (.env 파일, git 에 커밋되지 않음)")
+    if args.thinking == "auto" and args.max_output_tokens < 1024:
+        p.error(f"--thinking auto 인데 --max-output-tokens 가 {args.max_output_tokens} 로 낮다. "
+                "thinking 토큰이 예산을 다 써서 빈 응답이 된다. 1024 이상으로 올리거나 --thinking off 를 써라")
     return args
 
 
@@ -654,8 +766,8 @@ def main(argv=None):
     total = sum(len(d.eval_samples) for d in datasets) * len(args.shots)
     if args.env_file_used:
         print(f"env loaded from {args.env_file_used}")
-    print(f"model={args.model} shots={args.shots} max_loops={args.max_loops} "
-          f"seed={args.seed} conditions={total}")
+    print(f"provider={args.provider} model={args.model} thinking={args.thinking} "
+          f"shots={args.shots} max_loops={args.max_loops} seed={args.seed} conditions={total}")
     for d in datasets:
         print(f"  - {d.name}: eval={len(d.eval_samples)} shot_pool={len(d.shot_pool)} "
               f"labels={len(d.labels)} task={d.task_type}")

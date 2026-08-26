@@ -168,7 +168,9 @@ python plot.py --results results.csv --out chart.png
 
 | 옵션 | 설명 |
 |---|---|
-| `--model` | Gemini 멀티모달 모델 이름 (두 데이터셋에 동일 적용, 기본 `gemini-3.5-flash-lite`) |
+| `--model` | 멀티모달 모델 이름 (두 데이터셋에 동일 적용, 기본 `gemini-3.5-flash-lite`) |
+| `--provider` | `auto`(기본) / `gemini` / `anthropic`. auto 는 모델 이름으로 판단한다 |
+| `--thinking` | `auto`(모델 기본값) / `off`(비용·지연 감소) |
 | `--shots` | few-shot 예시 개수 목록 (기본 `0 1 4 16`) |
 | `--samples` | 데이터셋당 평가 샘플 수 |
 | `--max-loops` | 샘플당 최대 Agent loop 횟수 |
@@ -210,6 +212,16 @@ few-shot 예시의 답은 **데이터셋 원본 표기 그대로** 보여준다 
 정규화는 채점할 때만 하고, 예시가 소문자로 나가면 "정확히 이 문자열을 쓰라"는
 지시와 모순돼서 모델 행동에 영향을 준다.
 
+### 다른 백엔드
+
+기본은 Gemini 다. `--model claude-...` 를 주면 Anthropic 백엔드로 자동 전환된다
+(`pip install anthropic`, `ANTHROPIC_API_KEY` 필요).
+설계상 "두 데이터셋에 같은 멀티모달 모델" 이기만 하면 되므로 모델 종류는 바꿔도 실험이 성립한다.
+
+> ⚠️ Anthropic 경로는 **아직 실제 호출로 검증하지 않았다** (키가 없어서 변환 로직만 확인).
+> 실제로 쓰기 전에 소량으로 먼저 돌려봐야 한다.
+> Claude 최신 모델은 `temperature` 가 제거되어 있어서 `--temperature` 는 무시된다.
+
 ---
 
 ## Agent 구조
@@ -246,11 +258,23 @@ loop 안에서 **하지 않는 것**: prompt 수정 ❌ / shot 변경 ❌ / 힌�
 | `gemini-2.5-*` | - | - | 404 (신규 사용자 불가) |
 
 flash 계열은 **하루 20회**라 실험이 불가능하다. **flash-lite (500 RPD)** 를 쓴다.
-RPM 15 이므로 `--rpm 15` 로 간격을 두면 429 없이 돌아간다.
 
 ```bash
---model gemini-3.5-flash-lite --rpm 15
+--model gemini-3.5-flash-lite --rpm 12
 ```
+
+RPM 보다 **TPM(분당 250K) 이 먼저 걸린다.** 실측으로 이미지 1장 ≈ 1,090 input token 이라
+16-shot 이면 호출당 약 18,700 token 이 나간다. RPM 15 를 다 쓰면 280K TPM 으로 한도를 넘는다.
+그래서 `--rpm 12` 정도로 두는 게 안전하다. 넘더라도 429 의 `retryDelay` 를 존중해 대기했다가
+이어서 돌기 때문에 데이터가 깨지지는 않고 느려지기만 한다.
+
+실측 (flash-lite, 32x32 이미지 기준):
+
+| 조건 | input tokens / call |
+|---|---|
+| 0-shot (이미지 1장) | 1,248 |
+| 2-shot (이미지 3장) | 3,437 |
+| 16-shot (이미지 17장, 추정) | 약 18,700 |
 
 `--rpm` 은 정답/오답과 무관하게 **매 호출 앞에서** 간격을 지킨다.
 (현재 한도는 <https://ai.dev/rate-limit> 에서 확인)
