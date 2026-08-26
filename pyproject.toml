@@ -1,0 +1,28 @@
+[project]
+name = "bain-ac-panel"
+version = "0.1.0"
+description = "An MBB-style strategy panel: verified fact base, seven blind lenses, red team, Partner synthesis."
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+]
+# No model-API SDK is a required dependency: panel/runners/ is the provider
+# boundary, and only the runner you actually select needs its client library
+# installed. `mock` (built in, used by the test suite) needs none at all.
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+claude-agent-sdk = ["claude-agent-sdk>=0.1.0"]
+
+[project.scripts]
+panel = "panel.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["panel", "panel.runners"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
