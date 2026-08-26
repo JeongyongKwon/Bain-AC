@@ -383,6 +383,20 @@ def _retry_delay(body: str, headers, fallback: float) -> float:
     return fallback
 
 
+_last_call_at = [0.0]
+
+
+def throttle(args):
+    """호출 사이 최소 간격을 지킨다. RPM 제한이 있는 무료 tier 에서 필요하다."""
+    interval = max(args.sleep, 60.0 / args.rpm if args.rpm else 0.0)
+    if interval <= 0:
+        return
+    wait = _last_call_at[0] + interval - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+    _last_call_at[0] = time.monotonic()
+
+
 def call_gemini(args, contents, instruction) -> CallResult:
     if args.mock:
         return _mock_call(args)
@@ -469,6 +483,7 @@ def run_condition(args, dataset, shot_count, writer, fh, counter, total):
         loop_index, api_failures = 0, 0
 
         while loop_index < args.max_loops:
+            throttle(args)
             result = call_gemini(args, contents, dataset.instruction)
             elapsed_s += result.latency_ms / 1000.0
 
@@ -512,8 +527,6 @@ def run_condition(args, dataset, shot_count, writer, fh, counter, total):
             if result.transport and api_failures >= args.max_api_failures:
                 print(f"  [give up] API 실패 {api_failures}회 연속 -> 이 샘플은 건너뛴다")
                 break
-            if args.sleep:
-                time.sleep(args.sleep)
 
 
 def load_done(path: Path, max_loops: int) -> set:
@@ -559,7 +572,7 @@ def parse_args(argv=None):
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dataset", nargs="+", required=True, choices=["chestxray", "sequence"],
                    help="실행할 데이터셋")
-    p.add_argument("--model", default="gemini-3.6-flash", help="Gemini 멀티모달 모델 이름")
+    p.add_argument("--model", default="gemini-3.5-flash-lite", help="Gemini 멀티모달 모델 이름")
     p.add_argument("--shots", type=int, nargs="+", default=[0, 1, 4, 16], help="few-shot 예시 개수")
     p.add_argument("--samples", type=int, default=25, help="데이터셋당 평가 샘플 수")
     p.add_argument("--max-loops", type=int, default=5, help="샘플당 최대 Agent loop 횟수")
@@ -589,7 +602,9 @@ def parse_args(argv=None):
                    help="Gemini 2.5 계열 thinking 토큰 예산 (0=비활성)")
     p.add_argument("--timeout", type=float, default=120.0)
     p.add_argument("--max-retries", type=int, default=3, help="전송 실패 재시도 (loop 로 세지 않음)")
-    p.add_argument("--sleep", type=float, default=0.0, help="호출 사이 대기 (rate limit 용)")
+    p.add_argument("--sleep", type=float, default=0.0, help="호출 사이 최소 대기 (초)")
+    p.add_argument("--rpm", type=float, default=0.0,
+                   help="분당 호출 수 상한. 무료 tier RPM 에 맞춰 자동으로 간격을 둔다 (0=제한 없음)")
     p.add_argument("--max-api-failures", type=int, default=5,
                    help="연속 API 실패가 이만큼 쌓이면 그 샘플을 포기한다")
     p.add_argument("--mock", action="store_true", help="API 없이 파이프라인만 점검 (결과는 무의미)")

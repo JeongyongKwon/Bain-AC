@@ -152,7 +152,7 @@ data/seq.csv
 # 두 데이터셋을 한 번에
 python run.py \
   --dataset chestxray sequence \
-  --model gemini-3.6-flash \
+  --model gemini-3.5-flash-lite \
   --data-dir data/chestxray14 \
   --seq-csv data/seq.csv --seq-id-col id \
   --shots 0 1 4 16 \
@@ -168,14 +168,15 @@ python plot.py --results results.csv --out chart.png
 
 | 옵션 | 설명 |
 |---|---|
-| `--model` | Gemini 멀티모달 모델 이름 (두 데이터셋에 동일 적용, 기본 `gemini-3.6-flash`) |
+| `--model` | Gemini 멀티모달 모델 이름 (두 데이터셋에 동일 적용, 기본 `gemini-3.5-flash-lite`) |
 | `--shots` | few-shot 예시 개수 목록 (기본 `0 1 4 16`) |
 | `--samples` | 데이터셋당 평가 샘플 수 |
 | `--max-loops` | 샘플당 최대 Agent loop 횟수 |
 | `--pool-size` | few-shot 예시를 뽑아 두는 held-out pool 크기 (기본 16) |
 | `--temperature` | 기본 1.0 |
 | `--thinking-budget` | Gemini 2.5 계열의 thinking 토큰 예산 (`0` 이면 비활성) |
-| `--sleep` | 호출 간 대기 (rate limit 대응) |
+| `--rpm` | 분당 호출 수 상한. 무료 tier RPM 에 맞춰 자동 간격 (0=무제한) |
+| `--sleep` | 호출 사이 최소 대기 (초) |
 | `--max-api-failures` | 연속 API 실패가 이만큼 쌓이면 그 샘플을 포기 (기본 5) |
 | `--resume` | `results.csv` 에서 이미 끝난 (조건, 샘플) 은 건너뛴다 |
 | `--mock` | API 없이 파이프라인만 점검 (결과는 무의미, `model` 컬럼에 `mock:` prefix) |
@@ -232,16 +233,27 @@ loop 안에서 **하지 않는 것**: prompt 수정 ❌ / shot 변경 ❌ / 힌�
   - `plot.py` 는 `loop_index=0` 행을 집계에서 제외한다.
 - 모델이 응답은 했는데 내용이 비었거나 차단된 경우는 **오답 loop 1회**로 센다 (`ERROR: ...`).
 
-### rate limit
+### rate limit (무료 tier)
 
-무료 tier 는 분당/일일 quota 가 빡빡해서 429 가 자주 난다. 실험 시간의 대부분이 대기가 될 수 있다.
+무료 tier 한도는 **모델별로 다르다.** 실측값:
+
+| 모델 | RPM | RPD (하루) | 이미지 입력 |
+|---|---|---|---|
+| `gemini-3.5-flash-lite` | 15 | **500** | O |
+| `gemini-3.1-flash-lite` | 15 | **500** | O |
+| `gemini-3.6-flash` | 5 | 20 | O |
+| `gemini-3.5-flash` / `3.7-flash` | 5 | 20 | O |
+| `gemini-2.5-*` | - | - | 404 (신규 사용자 불가) |
+
+flash 계열은 **하루 20회**라 실험이 불가능하다. **flash-lite (500 RPD)** 를 쓴다.
+RPM 15 이므로 `--rpm 15` 로 간격을 두면 429 없이 돌아간다.
 
 ```bash
---sleep 2        # 호출 사이 2초 대기
---samples 20     # 샘플 수를 줄여서 시작
+--model gemini-3.5-flash-lite --rpm 15
 ```
 
-quota 를 다 쓰면 `retryDelay` 가 길게 돌아오고 그만큼 대기한다. 규모를 키우려면 유료 tier 가 필요하다.
+`--rpm` 은 정답/오답과 무관하게 **매 호출 앞에서** 간격을 지킨다.
+(현재 한도는 <https://ai.dev/rate-limit> 에서 확인)
 
 ---
 
