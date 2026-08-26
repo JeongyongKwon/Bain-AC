@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import collections
 import csv
 import json
 import os
@@ -227,8 +228,8 @@ def load_sequence(args, rng) -> Dataset:
                  f"(필요 {max(args.shots)}), eval={len(eval_samples)}")
 
     instruction = (
-        "You are a nucleotide sequence classifier.\n"
-        "You are given a DNA sequence written in the A/C/G/T alphabet. Classify it.\n"
+        "You are a biological sequence classifier.\n"
+        f"{args.seq_desc or describe_sequences([s.payload for s in rows[:200]])} Classify it.\n"
         "Allowed labels (use these exact strings):\n"
         + "\n".join(f"- {l}" for l in labels) + "\n"
         "Rules:\n"
@@ -237,6 +238,25 @@ def load_sequence(args, rng) -> Dataset:
     )
     task_type = "singlelabel_classification" if single_label else "multilabel_classification"
     return Dataset("sequence", task_type, labels, shot_pool, eval_samples, instruction)
+
+
+NUCLEOTIDE_ALPHABET = set("ACGTUN")
+
+
+def describe_sequences(samples) -> str:
+    """서열 알파벳을 보고 핵산인지 단백질인지 판별해 프롬프트 문구를 만든다.
+
+    데이터가 DNA 가 아닌데 "A/C/G/T alphabet" 이라고 말하면 모델에 거짓 정보를 주게 된다.
+    """
+    chars = collections.Counter(c for s in samples for c in s if c.isalpha())
+    total = sum(chars.values()) or 1
+    nucleic = sum(n for c, n in chars.items() if c in NUCLEOTIDE_ALPHABET) / total
+    kind = ("a DNA sequence written in the A/C/G/T alphabet" if nucleic > 0.95
+            else "a protein sequence written in the standard amino-acid alphabet")
+    text = f"You are given {kind}."
+    if sum(s.count("|") for s in samples) >= len(samples) * 0.9:
+        text += " The string holds two parts separated by '|'."
+    return text
 
 
 def _stratified_pool(rows, k, labels, rng):
@@ -688,7 +708,9 @@ def parse_args(argv=None):
     p.add_argument("--seq-col", default="sequence")
     p.add_argument("--seq-label-col", default="label")
     p.add_argument("--seq-id-col", default=None)
-    p.add_argument("--seq-max-len", type=int, default=0, help="염기서열 최대 길이 (0=자르지 않음)")
+    p.add_argument("--seq-max-len", type=int, default=0, help="서열 최대 길이 (0=자르지 않음)")
+    p.add_argument("--seq-desc", default=None,
+                   help="서열이 무엇인지 설명하는 한 문장. 생략하면 알파벳을 보고 자동 판별한다")
 
     p.add_argument("--temperature", type=float, default=1.0,
                    help="Gemini 전용. 0 이면 매 loop 가 같은 응답이 되어 loop 가 의미를 잃는다. "
