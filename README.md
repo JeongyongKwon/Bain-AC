@@ -1,112 +1,327 @@
-# Bain-AC — Strategy Panel
+# Few-shot LLM 데이터 처리 난이도 비교 실험
 
-A multi-agent strategy panel. Give it a market research report; it returns a fact-checked, multi-lens review and one defensible recommendation.
+동일한 Gemini 멀티모달 모델로 **의료영상**과 **염기서열** 두 데이터셋을 처리하면서,
+few-shot 예시 수를 `0 / 1 / 4 / 16` 으로 늘릴 때
+**정답에 도달하기까지 필요한 Agent loop 횟수와 소요 시간**이 얼마나 줄어드는지 측정한다.
 
-Built as ten agents modelled on an MBB engagement team: a Research & Data Services desk that owns the verified fact base, seven practice lenses that read the report independently, a red team that attacks their work, and a Partner who decides.
+메인 지표는 **평균 loop count**, latency 와 token 은 처리 비용을 설명하는 보조 지표다.
 
-> 한국어: [`README.ko.md`](README.ko.md)
+| | 데이터셋 A | 데이터셋 B |
+|---|---|---|
+| 데이터 | NIH ChestX-ray14 | 염기서열 (task/데이터셋 지정) |
+| 입력 | 이미지 | 텍스트 |
+| task | multilabel classification | classification |
+| 모델 | 동일한 Gemini 멀티모달 모델 | 동일한 Gemini 멀티모달 모델 |
 
-## Run a round
+---
 
-Two runtimes, one shared set of agent definitions.
+## 파일 구조
 
-**Python CLI** — headless, for schedulers and CI:
+```
+README.md      이 문서
+run.py         실험 러너 (데이터 로딩 → few-shot 구성 → Gemini 호출 → Agent loop → CSV append)
+results.csv    호출 단위 raw execution log (별도 log 파일은 만들지 않는다)
+plot.py        results.csv 집계 → chart.png
+chart.png      결과 그래프 (plot.py 실행 시 생성)
+.gitignore     .env / data/ 를 커밋에서 제외
+```
+
+데이터셋과 API 키는 레포에 넣지 않는다. 로컬에 `data/` 와 `.env` 로 두면 된다.
+
+`run.py` 는 표준 라이브러리만 사용한다. (Pillow 가 설치되어 있으면 이미지 축소에만 사용)
+`plot.py` 는 `matplotlib` 이 필요하다.
 
 ```bash
-pip install -e ".[dev,claude-agent-sdk]"   # dev = pytest; claude-agent-sdk = the default runner
-
-panel run inbox/report.pdf --lang ko    # reports written in Korean
-panel run inbox/report.pdf --dry-run    # show the plan, spend nothing
-panel run inbox/report.pdf --runner mock  # exercise the full pipeline offline, free
-panel roster                            # loaded agents and the phase graph
-panel runners                           # available model-API backends
-panel qc reports/2026-08-16-report      # re-check a completed round
+pip install matplotlib          # plot.py 용
+pip install pillow              # (선택) 이미지 축소로 업로드 용량 절감
 ```
 
-The model API is swappable — `panel/pipeline.py` never imports a provider SDK directly, only the `AgentRunner` interface in `panel/runners/`. `claude-agent-sdk` is an *optional* dependency for exactly this reason: `pip install -e ".[dev]"` alone gets you the orchestrator, the agent loader, and the `mock` runner, with nothing Anthropic-specific required. See `docs/ARCHITECTURE.md` § Swappable model backend.
+---
 
-**Claude Code** — interactive:
+## API 키 (env)
 
-```
-/panel inbox/some-market-report.pdf
-```
+`GEMINI_API_KEY` (없으면 `GOOGLE_API_KEY`) 하나만 있으면 된다.
+[Google AI Studio](https://aistudio.google.com/apikey) 에서 발급한다.
 
-Output lands in `reports/YYYY-MM-DD-<slug>/`. The deliverable is `04-partner-synthesis.md`; everything else is the audit trail behind it.
+**방법 1 — 셸 환경변수** (그 터미널 세션에서만 유효)
 
-## First-time setup
-
-1. **Fill in `context/00-core-brief.md`.** Every agent reads it every round. Two pages, replacing the template.
-2. **Add context files** under `context/*/` and register each one in `context/INDEX.md`. Start with whatever you have — the panel works with a thin context pack and gets sharper as it fills.
-3. **Read `docs/HOUSE-STANDARD.md`.** It is the evidence contract the agents work to, and it is what you should hold their output against.
-
-## How it works
-
-```mermaid
-flowchart LR
-    A[report] --> B["fact base<br/>(research-desk)"]
-    B --> C["7 blind lenses<br/>(parallel)"]
-    C --> D[red team]
-    D --> E["Partner<br/>synthesis"]
+```bash
+export GEMINI_API_KEY=AIza...
+python run.py --dataset ...
 ```
 
-The design turns on three choices:
+**방법 2 — `.env` 파일** (권장. 레포 루트에 두면 `run.py` 가 자동으로 읽는다)
 
-- **The fact base blocks everything.** No lens runs until claims are verified and graded, so no lens has to invent a number to fill a gap.
-- **The lenses are blind to each other.** Dispatched in parallel, so none can read another's conclusion and anchor on it. Their disagreements are the product.
-- **Challenge is separate from decision.** The red team attacks; the Partner decides. An agent that has just attacked the work is badly placed to then stand behind it.
+```bash
+echo 'GEMINI_API_KEY=AIza...' > .env
+```
 
-Full reasoning in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). What feeds the lenses in the first place — natural-language context, verified research, and human-selected memory from past rounds — is covered separately in [`docs/CONTEXT-MEMORY-ARCHITECTURE.md`](docs/CONTEXT-MEMORY-ARCHITECTURE.md) (target architecture; not yet built).
+```
+Bain-AC/
+  run.py
+  .env        <- 여기. .gitignore 에 있어서 커밋되지 않는다
+```
 
-## The evidence rule
+- 경로를 바꾸려면 `--env-file path/to/.env`
+- 실행 디렉터리에 없으면 `run.py` 옆도 찾아본다
+- **셸 환경변수가 `.env` 보다 우선한다** (이미 export 된 값은 덮어쓰지 않는다)
+- 키가 없으면 실행 즉시 에러로 알려준다. `--mock` 은 키 없이 돌아간다
 
-No bare numbers. Every quantified claim carries a tag showing where it came from:
+---
 
-| Tag | Means |
+## 데이터 준비
+
+데이터는 레포에 넣지 않는다 (`data/` 는 `.gitignore` 에 있다). 로컬에 받아서 경로만 넘긴다.
+
+### A. NIH ChestX-ray14
+
+받는 곳 (둘 다 같은 데이터다)
+
+| 출처 | 방법 |
 |---|---|
-| `[F-012]` | Verified — source, URL, access date, verbatim quote in the fact base |
-| `[R-p14]` | The report says so on p.14. **Not verified.** |
-| `[C-finance/unit-econ.md]` | From our internal context pack |
-| `[EST: method]` | An estimate, with a reproducible derivation |
-| `[ASSUMPTION]` | A knowingly unevidenced premise |
+| NIH 공식 (Box) | <https://nihcc.app.box.com/v/ChestXray-NIHCC> — `images_001.tar.gz` ~ `images_012.tar.gz` + `Data_Entry_2017_v2020.csv`. 공식 `batch_download_zips.py` 스크립트도 같이 올라와 있다 |
+| Kaggle 미러 | `kaggle datasets download -d nih-chest-xrays/data` (전체 다운로드). 특정 파일만 받으려면 `-f <파일명>` |
 
-`[F-]` versus `[R-]` is the distinction that matters. One means someone checked; the other means the report asserted it. A recommendation resting on `[R-]` is flagged, not hidden.
-
-## Layout
+전체는 112,120장 / 약 42GB 다. **전부 받을 필요 없다.**
+`run.py` 는 실제로 존재하는 이미지 파일만 인덱싱하고 메타데이터에서 파일이 없는 행은 건너뛴다.
+그래서 **샤드 하나(약 4~5천 장)만 받아도** `--samples 50` 규모 실험은 그대로 돌아간다.
 
 ```
-.claude/agents/       ten agent definitions — the single source of truth
-.claude/skills/panel/ the /panel orchestrator (Claude Code)
-panel/                Python runtime — pipeline, agent loader, QC verifier
-panel/runners/         the provider boundary — AgentRunner interface + implementations
-tests/                40 tests (pytest)
-context/              your offline context pack; INDEX.md is the manifest
-docs/                 HOUSE-STANDARD.md (evidence contract), ARCHITECTURE.md
-docs/ko/              Korean documentation
-inbox/                drop new reports here
-reports/              round outputs
+data/chestxray14/
+  Data_Entry_2017.csv          # "Image Index", "Finding Labels", "Patient ID" 컬럼만 사용
+  images_001/images/*.png      # 하위 폴더는 재귀 탐색하므로 구조는 자유
 ```
-
-The markdown in `.claude/` is executable configuration — its YAML frontmatter
-enforces model routing and tool permissions at runtime, and `panel/agents.py`
-loads the same files into SDK objects. A strategist can retune a lens prompt
-without touching Python, and both runtimes pick up the change.
-
-## Development
 
 ```bash
-python3 -m pytest tests/ -q     # 64 passed — no API key or network needed; the `mock` runner covers the rest
+--data-dir data/chestxray14
+# 메타데이터 파일명이 다르면 (예: 공식 Box 판)
+--data-dir data/chestxray14 --chest-csv Data_Entry_2017_v2020.csv
 ```
 
-`panel/verify.py` is pure functions with no model calls. If the evidence-contract
-check were itself an LLM call, it would inherit exactly the failure mode it
-exists to catch.
+- few-shot pool 과 평가 샘플은 **환자 단위로 분리**해 leakage 를 막는다.
+- `No Finding` 이 전체의 절반 이상이라 그대로 쓰면 "No Finding 만 찍어도 맞는" 샘플이 많아진다.
+  난이도를 올리려면 `--drop-no-finding` 을 쓴다.
+- 원본이 1024×1024 PNG 라 16-shot 이면 업로드가 커진다. Pillow 를 깔면
+  `--image-max-side` (기본 512) 로 줄여서 보낸다.
 
-## Cost
+### B. 염기서열
 
-A full round is roughly **$7**; a quiet-day delta review about **$1.50**. Lens agents run on Sonnet 5, the Research Desk / Red Team / Partner on Opus 5 — change the `model:` line in any `.claude/agents/*.md` to shift the balance. At **daily** cadence the delta review's cost is the one that dominates the monthly bill (~30 of them a month, not ~3), landing a realistic month around **$67** rather than the ~$12 a weekly schedule would cost. Full cost model in `docs/ARCHITECTURE.md`.
+**아직 확정 안 됨.** 아래 중 하나를 고르면 되고, 어느 걸 골라도 코드 수정은 필요 없다.
+CSV 형식만 맞추면 된다.
 
-## Daily rounds
+| 후보 | task | 특징 |
+|---|---|---|
+| Genomic Benchmarks `human_nontata_promoters` | promoter / non-promoter 2분류 | 251bp, 약 36k. `pip install genomic-benchmarks` 또는 HuggingFace |
+| GUE (DNABERT-2 벤치마크) | promoter, splice site, TF binding 등 | 이미 `sequence,label` CSV 로 배포되어 거의 그대로 쓸 수 있다 |
+| UCI Splice-junction | EI / IE / N 3분류 | 60bp, 3,190건. 가장 가볍게 시작하기 좋다 |
 
-With no new report, `/panel` runs a **delta review**: it checks only whether any trigger from the last synthesis has fired, and reports that nothing changed if nothing did. At daily frequency, most days *are* quiet — a recurring panel that manufactures findings to justify its schedule burns trust within the first week.
+추천: **길이가 짧은 2~3분류**부터. 서열이 길면 16-shot 프롬프트의 input token 이 급격히 늘어
+"loop 가 줄어드는 효과"와 "프롬프트가 비싸지는 효과"가 섞인다.
 
-**Status:** this delta-review logic exists in the `/panel` skill for the Claude Code path. It is not yet implemented in `panel/pipeline.py` — the Python CLI's `run` command always executes the full pipeline, so unattended daily scheduling (cron/CI) needs that branch built first.
+> ⚠️ **label 이름은 `0` / `1` 같은 숫자를 쓰지 말고 의미 있는 문자열로 바꿔라.**
+> 라벨이 `0`/`1` 이면 0-shot 조건에서 모델이 어느 쪽이 promoter 인지 알 방법이 없어
+> 사실상 찍기가 되고, few-shot 효과가 과대평가된다.
+> `promoter` / `non_promoter` 처럼 바꿔서 0-shot 도 의미를 갖게 해야 비교가 성립한다.
+
+준비되면 아래 형태의 CSV 로만 맞춰 주면 된다.
+
+```csv
+id,sequence,label
+s0,ACGTACGTTTGA...,promoter
+s1,GGCATTACGCAT...,non_promoter
+```
+
+```
+data/seq.csv
+```
+
+```bash
+--seq-csv data/seq.csv --seq-col sequence --seq-label-col label --seq-id-col id
+```
+
+- 컬럼명은 위 옵션으로 바꿀 수 있다.
+- label 이 여러 개면 `,` 또는 `|` 로 구분한다 (multilabel 로 자동 인식).
+- 단일 label 데이터면 few-shot 예시를 label round-robin 으로 뽑아 shot 수가 적을 때도 label 이 골고루 들어간다.
+- `--seq-max-len` 으로 서열을 자를 수 있다 (기본 0 = 자르지 않음).
+
+---
+
+## 실행
+
+```bash
+# 두 데이터셋을 한 번에
+python run.py \
+  --dataset chestxray sequence \
+  --model gemini-3.6-flash \
+  --data-dir data/chestxray14 \
+  --seq-csv data/seq.csv --seq-id-col id \
+  --shots 0 1 4 16 \
+  --samples 50 \
+  --max-loops 5 \
+  --seed 0 \
+  --out results.csv
+
+python plot.py --results results.csv --out chart.png
+```
+
+주요 옵션
+
+| 옵션 | 설명 |
+|---|---|
+| `--model` | Gemini 멀티모달 모델 이름 (두 데이터셋에 동일 적용, 기본 `gemini-3.6-flash`) |
+| `--shots` | few-shot 예시 개수 목록 (기본 `0 1 4 16`) |
+| `--samples` | 데이터셋당 평가 샘플 수 |
+| `--max-loops` | 샘플당 최대 Agent loop 횟수 |
+| `--pool-size` | few-shot 예시를 뽑아 두는 held-out pool 크기 (기본 16) |
+| `--temperature` | 기본 1.0 |
+| `--thinking-budget` | Gemini 2.5 계열의 thinking 토큰 예산 (`0` 이면 비활성) |
+| `--sleep` | 호출 간 대기 (rate limit 대응) |
+| `--max-api-failures` | 연속 API 실패가 이만큼 쌓이면 그 샘플을 포기 (기본 5) |
+| `--resume` | `results.csv` 에서 이미 끝난 (조건, 샘플) 은 건너뛴다 |
+| `--mock` | API 없이 파이프라인만 점검 (결과는 무의미, `model` 컬럼에 `mock:` prefix) |
+| `--env-file` | API 키를 읽을 `.env` 경로 (기본 `.env`) |
+| `--show-prompt` | API 호출 없이 **실제로 전송될 프롬프트만 출력**하고 종료 |
+
+동일 `--seed` 면 어떤 데이터셋/shot 조합을 실행하든 **같은 평가 샘플**이 뽑힌다.
+(데이터셋별 독립 RNG + 고정 `--pool-size`) 그래서 shot 조건을 나눠 돌려도 비교가 성립한다.
+
+few-shot 예시는 `1-shot ⊂ 4-shot ⊂ 16-shot` 이 되도록 같은 pool 의 prefix 를 쓴다.
+조건 사이에서 **바뀌는 것은 shot 수뿐이다.**
+
+---
+
+## 프롬프트 확인
+
+실제로 어떤 프롬프트가 나가는지는 API 호출 없이 그대로 볼 수 있다 (키도 필요 없다).
+
+```bash
+python run.py --dataset chestxray --data-dir data/chestxray14 --shots 0 4 --show-prompt
+python run.py --dataset sequence  --seq-csv data/seq.csv --shots 0 4 --show-prompt
+```
+
+프롬프트는 `run.py` 안에 있다.
+
+- 이미지: `load_chestxray()` 의 `instruction`
+- 염기서열: `load_sequence()` 의 `instruction`
+- few-shot 배치: `build_fewshot_contents()` — user/model 멀티턴으로 넣는다
+
+few-shot 예시의 답은 **데이터셋 원본 표기 그대로** 보여준다 (`Atelectasis`, `Pleural_Thickening`).
+정규화는 채점할 때만 하고, 예시가 소문자로 나가면 "정확히 이 문자열을 쓰라"는
+지시와 모순돼서 모델 행동에 영향을 준다.
+
+---
+
+## Agent 구조
+
+```
+Sample → Few-shot Prompt → Gemini Multimodal API → Response
+       → Normalize → Rule-based Evaluator → 정답?
+            ├─ YES → 종료
+            └─ NO  → 동일 조건으로 다시 호출 (반복)
+```
+
+loop 안에서 **하지 않는 것**: prompt 수정 ❌ / shot 변경 ❌ / 힌트 추가 ❌ / 모델 변경 ❌ / 데이터 변경 ❌
+고정된 task 를 정답이 나올 때까지 반복할 뿐이다. 이전 loop 의 오답도 프롬프트에 넣지 않는다.
+
+- `--temperature 0` 이면 매 loop 가 같은 응답이 되어 loop 가 의미를 잃는다. 기본값 1.0 을 권장한다.
+- HTTP 429/5xx/타임아웃은 **loop 로 세지 않는다.** 모델이 답을 준 게 아니라 호출 자체가 실패한 것이므로
+  오답으로 처리하면 loop count 지표가 오염된다.
+  - 먼저 `--max-retries` 만큼 재시도한다 (429 응답이 알려주는 `retryDelay` 를 존중, 최대 60초).
+  - 그래도 실패하면 `loop_index=0`, `predicted=API_FAILURE: ...` 로 **기록만 남기고** loop 예산을 쓰지 않는다.
+  - 연속 실패가 `--max-api-failures`(기본 5) 를 넘으면 그 샘플을 포기한다.
+  - `plot.py` 는 `loop_index=0` 행을 집계에서 제외한다.
+- 모델이 응답은 했는데 내용이 비었거나 차단된 경우는 **오답 loop 1회**로 센다 (`ERROR: ...`).
+
+### rate limit
+
+무료 tier 는 분당/일일 quota 가 빡빡해서 429 가 자주 난다. 실험 시간의 대부분이 대기가 될 수 있다.
+
+```bash
+--sleep 2        # 호출 사이 2초 대기
+--samples 20     # 샘플 수를 줄여서 시작
+```
+
+quota 를 다 쓰면 `retryDelay` 가 길게 돌아오고 그만큼 대기한다. 규모를 키우려면 유료 tier 가 필요하다.
+
+---
+
+## 정답 판정
+
+Judge LLM 을 쓰지 않는다. 응답을 normalization 한 뒤 코드로 GT 와 비교한다 (집합 일치).
+
+**허용되는 형식적 차이**
+
+| 입력 | 정규화 결과 |
+|---|---|
+| `Pneumonia, Effusion` | `effusion, pneumonia` |
+| `pneumonia, effusion` | `effusion, pneumonia` |
+| `Pneumonia,  Effusion.` | `effusion, pneumonia` |
+| `**Pneumonia**, Effusion` | `effusion, pneumonia` |
+| `Answer: Pneumonia, Effusion` | `effusion, pneumonia` |
+| `- Pneumonia\n- Effusion` | `effusion, pneumonia` |
+| `Pleural_Thickening` / `Pleural Thickening` | `pleural thickening` |
+
+대소문자, whitespace, comma spacing, 끝 punctuation, markdown/코드펜스, `Answer:` 류 prefix,
+label 순서, underscore/space 차이만 흡수한다.
+
+**허용하지 않음**: 의미가 비슷하다는 이유로 다른 label 을 정답 처리하지 않는다.
+(`Pleural Effusion` ≠ `Effusion`, label 누락/추가는 오답)
+
+---
+
+## results.csv
+
+API 호출이 끝날 때마다 즉시 append + flush 한다. 중간에 프로세스가 죽어도 그때까지의 실행이 남는다.
+이 파일이 raw execution log 역할을 한다.
+
+| 컬럼 | 의미 |
+|---|---|
+| `dataset` | `chestxray` / `sequence` |
+| `task_type` | `multilabel_classification` / `singlelabel_classification` |
+| `model` | 사용한 모델 이름 (`--mock` 이면 `mock:` prefix) |
+| `shot_count` | few-shot 예시 개수 |
+| `seed` | 샘플링 seed |
+| `sample_id` | 이미지 파일명 또는 서열 ID |
+| `loop_index` | 이 샘플의 몇 번째 loop 인가 (1부터). **`0` 은 API 실패**(429/타임아웃) 기록이며 loop 로 세지 않는다 |
+| `predicted` | 정규화된 예측 label 집합. 모델이 이상하게 답한 경우 `ERROR: ...`, API 자체가 실패한 경우 `API_FAILURE: ...` |
+| `gt` | 정규화된 정답 label 집합 |
+| `correct` | `True` / `False` |
+| `latency_ms` | 이번 호출 1회의 응답 시간 |
+| `input_tokens` | 응답 `usageMetadata.promptTokenCount` (추정하지 않음) |
+| `output_tokens` | `candidatesTokenCount + thoughtsTokenCount` (추정하지 않음) |
+| `elapsed_s` | 이 샘플에서 여기까지 누적된 응답 시간 합 (throttle sleep 제외) |
+
+터미널 출력
+
+```
+[12/100] dataset=chestxray shot=4 sample=00003011_000.png loop=2 correct=False | pneumonia
+```
+
+`[n/총 조건수]` 는 (데이터셋 × shot × 샘플) 조건 진행도다.
+
+---
+
+## 지표
+
+`plot.py` 가 (dataset, shot_count) 단위로 집계한다.
+
+`loop_index=0` (API 실패) 행은 집계에서 빠진다.
+
+1. **Average loop count** — 메인 지표. 샘플별 `max(loop_index)` 의 평균.
+   최대 loop 안에 못 맞춘 샘플은 `max_loops` 로 잘린 값(censored)이 들어가므로 success rate 와 함께 읽어야 한다.
+2. **Total latency** — 샘플별 `latency_ms` 합의 평균 (초).
+3. **Input tokens** — 샘플별 input token 합의 평균. 정답 1건을 얻는 데 든 입력 비용이다.
+4. **Success rate** — 최대 loop 안에 정답에 도달한 샘플 비율.
+
+`chart.png` 는 2×2 패널이고, 좌상단이 메인 그래프(Shot vs Avg Loop Count)다.
+두 데이터셋을 같은 축에 그려서 **few-shot 이 어느 데이터 유형의 처리 난도를 더 크게 낮추는지** 본다.
+
+집계 표는 실행 시 터미널에도 출력된다.
+
+```
+dataset      shot    n  avg_loop  latency_s    in_tok  out_tok  success%
+------------------------------------------------------------------------
+chestxray       0   50      3.42       8.11      1420       24      62.0
+chestxray       4   50      2.10       5.02      6180       21      88.0
+...
+```

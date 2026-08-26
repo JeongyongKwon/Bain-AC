@@ -5,3 +5,14 @@ venv/
 *.egg-info/
 .pytest_cache/
 reports/2*/
+# API 키 (절대 커밋하지 않는다)
+.env
+.env.*
+
+# 로컬 데이터셋 (용량이 커서 레포에 넣지 않는다)
+data/
+*.tar.gz
+*.zip
+
+__pycache__/
+*.pyc
