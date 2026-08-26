@@ -468,6 +468,28 @@ def load_done(path: Path, max_loops: int) -> set:
 
 # --------------------------------------------------------------------------
 
+def load_dotenv(path: str) -> str:
+    """.env 파일이 있으면 환경변수로 읽어들인다.
+
+    이미 셸에 설정된 환경변수는 덮어쓰지 않는다 (셸 > .env 우선순위).
+    실행 디렉터리에 없으면 run.py 옆도 찾아본다.
+    """
+    candidates = [Path(path), Path(__file__).resolve().parent / path]
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        for line in candidate.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            line = line[7:] if line.startswith("export ") else line
+            key, sep, value = line.partition("=")
+            if sep:
+                os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+        return str(candidate)
+    return ""
+
+
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -505,6 +527,7 @@ def parse_args(argv=None):
     p.add_argument("--max-retries", type=int, default=3, help="전송 실패 재시도 (loop 로 세지 않음)")
     p.add_argument("--sleep", type=float, default=0.0, help="호출 사이 대기 (rate limit 용)")
     p.add_argument("--mock", action="store_true", help="API 없이 파이프라인만 점검 (결과는 무의미)")
+    p.add_argument("--env-file", default=".env", help="API 키를 읽을 .env 경로")
 
     args = p.parse_args(argv)
     if max(args.shots) > args.pool_size:
@@ -514,9 +537,12 @@ def parse_args(argv=None):
     if "sequence" in args.dataset and not args.seq_csv:
         p.error("--dataset sequence 에는 --seq-csv 가 필요하다")
     args.model_label = ("mock:" if args.mock else "") + args.model
+    args.env_file_used = load_dotenv(args.env_file)
     args.api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
     if not args.mock and not args.api_key:
-        p.error("환경변수 GEMINI_API_KEY (또는 GOOGLE_API_KEY) 가 필요하다")
+        p.error("API 키가 없다. 다음 중 하나로 넣어라:\n"
+                "  export GEMINI_API_KEY=...            (셸 환경변수)\n"
+                f"  echo 'GEMINI_API_KEY=...' > {args.env_file}   (.env 파일, git 에 커밋되지 않음)")
     return args
 
 
@@ -537,6 +563,8 @@ def main(argv=None):
     args._done = load_done(out_path, args.max_loops) if args.resume else set()
 
     total = sum(len(d.eval_samples) for d in datasets) * len(args.shots)
+    if args.env_file_used:
+        print(f"env loaded from {args.env_file_used}")
     print(f"model={args.model} shots={args.shots} max_loops={args.max_loops} "
           f"seed={args.seed} conditions={total}")
     for d in datasets:

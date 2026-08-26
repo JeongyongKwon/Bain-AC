@@ -23,7 +23,10 @@ run.py         실험 러너 (데이터 로딩 → few-shot 구성 → Gemini �
 results.csv    호출 단위 raw execution log (별도 log 파일은 만들지 않는다)
 plot.py        results.csv 집계 → chart.png
 chart.png      결과 그래프 (plot.py 실행 시 생성)
+.gitignore     .env / data/ 를 커밋에서 제외
 ```
+
+데이터셋과 API 키는 레포에 넣지 않는다. 로컬에 `data/` 와 `.env` 로 두면 된다.
 
 `run.py` 는 표준 라이브러리만 사용한다. (Pillow 가 설치되어 있으면 이미지 축소에만 사용)
 `plot.py` 는 `matplotlib` 이 필요하다.
@@ -31,35 +34,105 @@ chart.png      결과 그래프 (plot.py 실행 시 생성)
 ```bash
 pip install matplotlib          # plot.py 용
 pip install pillow              # (선택) 이미지 축소로 업로드 용량 절감
-export GEMINI_API_KEY=...       # 또는 GOOGLE_API_KEY
 ```
+
+---
+
+## API 키 (env)
+
+`GEMINI_API_KEY` (없으면 `GOOGLE_API_KEY`) 하나만 있으면 된다.
+[Google AI Studio](https://aistudio.google.com/apikey) 에서 발급한다.
+
+**방법 1 — 셸 환경변수** (그 터미널 세션에서만 유효)
+
+```bash
+export GEMINI_API_KEY=AIza...
+python run.py --dataset ...
+```
+
+**방법 2 — `.env` 파일** (권장. 레포 루트에 두면 `run.py` 가 자동으로 읽는다)
+
+```bash
+echo 'GEMINI_API_KEY=AIza...' > .env
+```
+
+```
+Bain-AC/
+  run.py
+  .env        <- 여기. .gitignore 에 있어서 커밋되지 않는다
+```
+
+- 경로를 바꾸려면 `--env-file path/to/.env`
+- 실행 디렉터리에 없으면 `run.py` 옆도 찾아본다
+- **셸 환경변수가 `.env` 보다 우선한다** (이미 export 된 값은 덮어쓰지 않는다)
+- 키가 없으면 실행 즉시 에러로 알려준다. `--mock` 은 키 없이 돌아간다
 
 ---
 
 ## 데이터 준비
 
+데이터는 레포에 넣지 않는다 (`data/` 는 `.gitignore` 에 있다). 로컬에 받아서 경로만 넘긴다.
+
 ### A. NIH ChestX-ray14
 
-`--data-dir` 아래에 메타데이터 CSV 와 이미지가 있으면 된다. 이미지는 하위 폴더를 재귀 탐색한다.
+받는 곳 (둘 다 같은 데이터다)
+
+| 출처 | 방법 |
+|---|---|
+| NIH 공식 (Box) | <https://nihcc.app.box.com/v/ChestXray-NIHCC> — `images_001.tar.gz` ~ `images_012.tar.gz` + `Data_Entry_2017_v2020.csv`. 공식 `batch_download_zips.py` 스크립트도 같이 올라와 있다 |
+| Kaggle 미러 | `kaggle datasets download -d nih-chest-xrays/data` (전체 다운로드). 특정 파일만 받으려면 `-f <파일명>` |
+
+전체는 112,120장 / 약 42GB 다. **전부 받을 필요 없다.**
+`run.py` 는 실제로 존재하는 이미지 파일만 인덱싱하고 메타데이터에서 파일이 없는 행은 건너뛴다.
+그래서 **샤드 하나(약 4~5천 장)만 받아도** `--samples 50` 규모 실험은 그대로 돌아간다.
 
 ```
-chestxray14/
-  Data_Entry_2017.csv          # "Image Index", "Finding Labels", "Patient ID" 컬럼 사용
-  images_001/images/*.png
-  images_002/images/*.png
-  ...
+data/chestxray14/
+  Data_Entry_2017.csv          # "Image Index", "Finding Labels", "Patient ID" 컬럼만 사용
+  images_001/images/*.png      # 하위 폴더는 재귀 탐색하므로 구조는 자유
 ```
 
-few-shot pool 과 평가 샘플은 **환자 단위로 분리**해 leakage 를 막는다.
+```bash
+--data-dir data/chestxray14
+# 메타데이터 파일명이 다르면 (예: 공식 Box 판)
+--data-dir data/chestxray14 --chest-csv Data_Entry_2017_v2020.csv
+```
+
+- few-shot pool 과 평가 샘플은 **환자 단위로 분리**해 leakage 를 막는다.
+- `No Finding` 이 전체의 절반 이상이라 그대로 쓰면 "No Finding 만 찍어도 맞는" 샘플이 많아진다.
+  난이도를 올리려면 `--drop-no-finding` 을 쓴다.
+- 원본이 1024×1024 PNG 라 16-shot 이면 업로드가 커진다. Pillow 를 깔면
+  `--image-max-side` (기본 512) 로 줄여서 보낸다.
 
 ### B. 염기서열
 
-task/데이터셋이 확정되면 아래 형태의 CSV 로만 맞춰 주면 그대로 돌아간다.
+**아직 확정 안 됨.** 아래 중 하나를 고르면 되고, 어느 걸 골라도 코드 수정은 필요 없다.
+CSV 형식만 맞추면 된다.
+
+| 후보 | task | 특징 |
+|---|---|---|
+| Genomic Benchmarks `human_nontata_promoters` | promoter / non-promoter 2분류 | 251bp, 약 36k. `pip install genomic-benchmarks` 또는 HuggingFace |
+| GUE (DNABERT-2 벤치마크) | promoter, splice site, TF binding 등 | 이미 `sequence,label` CSV 로 배포되어 거의 그대로 쓸 수 있다 |
+| UCI Splice-junction | EI / IE / N 3분류 | 60bp, 3,190건. 가장 가볍게 시작하기 좋다 |
+
+추천: **길이가 짧은 2~3분류**부터. 서열이 길면 16-shot 프롬프트의 input token 이 급격히 늘어
+"loop 가 줄어드는 효과"와 "프롬프트가 비싸지는 효과"가 섞인다.
+
+> ⚠️ **label 이름은 `0` / `1` 같은 숫자를 쓰지 말고 의미 있는 문자열로 바꿔라.**
+> 라벨이 `0`/`1` 이면 0-shot 조건에서 모델이 어느 쪽이 promoter 인지 알 방법이 없어
+> 사실상 찍기가 되고, few-shot 효과가 과대평가된다.
+> `promoter` / `non_promoter` 처럼 바꿔서 0-shot 도 의미를 갖게 해야 비교가 성립한다.
+
+준비되면 아래 형태의 CSV 로만 맞춰 주면 된다.
 
 ```csv
 id,sequence,label
 s0,ACGTACGTTTGA...,promoter
 s1,GGCATTACGCAT...,non_promoter
+```
+
+```
+data/seq.csv
 ```
 
 ```bash
@@ -105,6 +178,7 @@ python plot.py --results results.csv --out chart.png
 | `--sleep` | 호출 간 대기 (rate limit 대응) |
 | `--resume` | `results.csv` 에서 이미 끝난 (조건, 샘플) 은 건너뛴다 |
 | `--mock` | API 없이 파이프라인만 점검 (결과는 무의미, `model` 컬럼에 `mock:` prefix) |
+| `--env-file` | API 키를 읽을 `.env` 경로 (기본 `.env`) |
 
 동일 `--seed` 면 어떤 데이터셋/shot 조합을 실행하든 **같은 평가 샘플**이 뽑힌다.
 (데이터셋별 독립 RNG + 고정 `--pool-size`) 그래서 shot 조건을 나눠 돌려도 비교가 성립한다.
