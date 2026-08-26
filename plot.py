@@ -47,7 +47,7 @@ def escalate_summary(rows):
     per_sample = {}
     for r in rows:
         key = (r["dataset"], r["seed"], r["sample_id"])
-        rec = per_sample.setdefault(key, {"rungs": 0, "solved_at": None,
+        rec = per_sample.setdefault(key, {"rungs": 0, "solved_at": None, "gt": r["gt"],
                                           "latency_s": 0.0, "input_tokens": 0})
         rec["rungs"] = max(rec["rungs"], int(r["loop_index"]))
         rec["latency_s"] += float(r["latency_ms"] or 0) / 1000.0
@@ -58,6 +58,18 @@ def escalate_summary(rows):
     for (dataset, _seed, _sid), rec in per_sample.items():
         grouped[dataset].append(rec)
     return grouped
+
+
+def constant_baseline(recs) -> float:
+    """항상 같은 답만 뱉는 예측기의 정확도(%).
+
+    평가셋에서 가장 흔한 정답을 계속 찍었을 때의 성적이다.
+    실제 성적이 이 선 근처면 모델이 과제를 푼 게 아니라 한쪽으로 쏠린 것이다.
+    """
+    counts = defaultdict(int)
+    for r in recs:
+        counts[r["gt"]] += 1
+    return 100.0 * max(counts.values()) / len(recs)
 
 
 def draw_escalate(grouped, ladder, out_path, title):
@@ -77,6 +89,13 @@ def draw_escalate(grouped, ladder, out_path, title):
             ax.annotate(f"{yi:.0f}%", (xi, yi), textcoords="offset points",
                         xytext=(0, 8), ha="center", fontsize=8,
                         color=COLORS[i % len(COLORS)])
+    for i, dataset in enumerate(datasets):
+        base = constant_baseline(grouped[dataset])
+        ax.axhline(base, color=COLORS[i % len(COLORS)], linestyle=":", linewidth=1.4, alpha=0.7)
+        ax.annotate(f"{dataset} constant-predictor baseline {base:.0f}%",
+                    (len(ladder) - 1, base), textcoords="offset points", xytext=(-4, -12),
+                    ha="right", fontsize=7.5, color=COLORS[i % len(COLORS)])
+
     ax.set_xticks(x); ax.set_xticklabels([str(s) for s in ladder])
     ax.set_xlabel("few-shot examples the agent had escalated to")
     ax.set_ylabel("samples solved so far (%)")
@@ -107,14 +126,20 @@ def draw_escalate(grouped, ladder, out_path, title):
 
 
 def print_escalate_table(grouped, ladder):
-    header = f"{'dataset':<12}{'n':>5}{'steps':>8}{'solved%':>9}{'latency_s':>11}{'in_tok':>9}"
+    header = (f"{'dataset':<12}{'n':>5}{'steps':>8}{'solved%':>9}{'baseline%':>11}"
+              f"{'latency_s':>11}{'in_tok':>9}")
     print(header); print("-" * len(header))
     for dataset in sorted(grouped):
         recs = grouped[dataset]
         solved = 100.0 * sum(1 for r in recs if r["solved_at"] is not None) / len(recs)
+        base = constant_baseline(recs)
         print(f"{dataset:<12}{len(recs):>5}{mean([r['rungs'] for r in recs]):>8.2f}"
-              f"{solved:>9.1f}{mean([r['latency_s'] for r in recs]):>11.2f}"
+              f"{solved:>9.1f}{base:>11.1f}"
+              f"{mean([r['latency_s'] for r in recs]):>11.2f}"
               f"{mean([r['input_tokens'] for r in recs]):>9.0f}")
+        zero = [r for r in recs if r["solved_at"] == ladder[0]]
+        print(f"{'':12}  {ladder[0]}-shot 만으로 푼 비율 {100.0*len(zero)/len(recs):>5.1f}% "
+              f"vs 상수 예측기 {base:.1f}%  -> 차이 {100.0*len(zero)/len(recs)-base:+.1f}%p")
         counts = {shot: sum(1 for r in recs if r["solved_at"] == shot) for shot in ladder}
         unsolved = sum(1 for r in recs if r["solved_at"] is None)
         detail = "  ".join(f"{shot}-shot:{counts[shot]}" for shot in ladder)
