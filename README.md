@@ -176,7 +176,8 @@ python plot.py --results results.csv --out chart.png
 | `--model` | 멀티모달 모델 이름 (두 데이터셋에 동일 적용, 기본 `gemini-3.5-flash-lite`) |
 | `--provider` | `auto`(기본) / `gemini` / `anthropic`. auto 는 모델 이름으로 판단한다 |
 | `--thinking` | `auto`(모델 기본값) / `off`(비용·지연 감소) |
-| `--shots` | few-shot 예시 개수 목록 (기본 `0 1 4 16`) |
+| `--mode` | `grid`(기본) = shot 조건별로 같은 프롬프트 반복 / `escalate` = 정답까지 shot 을 올려가며 재시도 |
+| `--shots` | few-shot 예시 개수 목록 (기본 `0 1 4 16`). escalate 모드에선 사다리가 된다 |
 | `--samples` | 데이터셋당 평가 샘플 수 |
 | `--max-loops` | 샘플당 최대 Agent loop 횟수 |
 | `--pool-size` | few-shot 예시를 뽑아 두는 held-out pool 크기 (기본 16) |
@@ -209,8 +210,9 @@ python run.py --dataset sequence  --seq-csv data/seq.csv --shots 0 4 --show-prom
 
 프롬프트는 `run.py` 안에 있다.
 
-- 이미지: `load_chestxray()` 의 `instruction`
-- 염기서열: `load_sequence()` 의 `instruction`
+- 두 데이터셋이 **완전히 같은 틀**(`INSTRUCTION_TEMPLATE`)을 쓴다.
+  다른 것은 "입력이 무엇인지" 한 문장뿐이다.
+  한쪽에만 데이터셋 이름이나 도메인 힌트를 주면 그 자체가 교란 변수가 되기 때문이다.
 - few-shot 배치: `build_fewshot_contents()` — user/model 멀티턴으로 넣는다
 
 few-shot 예시의 답은 **데이터셋 원본 표기 그대로** 보여준다 (`Atelectasis`, `Pleural_Thickening`).
@@ -237,6 +239,23 @@ Sample → Few-shot Prompt → Gemini Multimodal API → Response
             ├─ YES → 종료
             └─ NO  → 동일 조건으로 다시 호출 (반복)
 ```
+
+### 두 가지 모드
+
+**`--mode grid` (기본)** — 원래 설계다. shot 조건마다 별도로 돌리고, 그 안에서는
+완전히 같은 프롬프트를 정답이 나올 때까지 반복한다.
+
+> 실측: 오답 뒤 재호출에서 **85% 가 직전과 같은 답**을 냈다. 입력이 같으면 출력도 거의 같다.
+> 그래서 이 모드의 loop count 는 사실상 `1 + (max_loops-1) x 오답률` 이고,
+> 정확도의 단조 변환에 가깝다. 독립적인 난이도 지표로 읽으면 안 된다.
+
+**`--mode escalate`** — 정답이 나올 때까지 few-shot 예시 수를 사다리로 올린다
+(`0 -> 1 -> 4 -> 16`). 매 재시도의 프롬프트가 실제로 달라지므로 loop 이 일을 한다.
+`loop_index` 는 사다리의 몇 번째 칸인지, `shot_count` 는 그 칸의 예시 수를 뜻한다.
+지표는 "이 샘플을 풀려면 몇 shot 이 필요했나" 가 된다.
+
+grid 모드는 전수 격자라 escalate 의 결과를 사후에 유도할 수 있다(상위 집합).
+escalate 모드는 맞히는 즉시 멈춰서 호출 수가 적다.
 
 loop 안에서 **하지 않는 것**: prompt 수정 ❌ / shot 변경 ❌ / 힌트 추가 ❌ / 모델 변경 ❌ / 데이터 변경 ❌
 고정된 task 를 정답이 나올 때까지 반복할 뿐이다. 이전 loop 의 오답도 프롬프트에 넣지 않는다.

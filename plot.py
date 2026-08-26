@@ -24,6 +24,103 @@ COLORS = ["#c0392b", "#2471a3", "#1e8449", "#8e44ad"]
 MARKERS = ["o", "s", "^", "D"]
 
 
+def read_rows(path):
+    with open(path, newline="", encoding="utf-8") as fh:
+        # loop_index=0 은 모델 응답을 못 받은 API 실패다. 오답이 아니므로 제외한다.
+        return [r for r in csv.DictReader(fh) if int(r["loop_index"]) != 0]
+
+
+def detect_mode(rows):
+    """escalate 모드는 샘플당 loop_index=1 행이 정확히 하나다.
+
+    grid 모드는 shot 조건마다 loop 이 1부터 다시 시작하므로 여러 개가 나온다.
+    """
+    firsts = defaultdict(int)
+    for r in rows:
+        if int(r["loop_index"]) == 1:
+            firsts[(r["dataset"], r["seed"], r["sample_id"])] += 1
+    return "grid" if any(v > 1 for v in firsts.values()) else "escalate"
+
+
+def escalate_summary(rows):
+    """샘플별로 사다리를 몇 칸 올라갔고 어디서 풀렸는지 정리한다."""
+    per_sample = {}
+    for r in rows:
+        key = (r["dataset"], r["seed"], r["sample_id"])
+        rec = per_sample.setdefault(key, {"rungs": 0, "solved_at": None,
+                                          "latency_s": 0.0, "input_tokens": 0})
+        rec["rungs"] = max(rec["rungs"], int(r["loop_index"]))
+        rec["latency_s"] += float(r["latency_ms"] or 0) / 1000.0
+        rec["input_tokens"] += int(r["input_tokens"] or 0)
+        if r["correct"] == "True" and rec["solved_at"] is None:
+            rec["solved_at"] = int(r["shot_count"])
+    grouped = defaultdict(list)
+    for (dataset, _seed, _sid), rec in per_sample.items():
+        grouped[dataset].append(rec)
+    return grouped
+
+
+def draw_escalate(grouped, ladder, out_path, title):
+    datasets = sorted(grouped)
+    x = list(range(len(ladder)))
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8.5))
+    ax = axes[0][0]
+
+    for i, dataset in enumerate(datasets):
+        recs = grouped[dataset]
+        ys = [100.0 * sum(1 for r in recs
+                          if r["solved_at"] is not None and r["solved_at"] <= shot) / len(recs)
+              for shot in ladder]
+        ax.plot(x, ys, marker=MARKERS[i % len(MARKERS)], color=COLORS[i % len(COLORS)],
+                linewidth=2.2, markersize=7, label=f"{dataset} (n={len(recs)})")
+        for xi, yi in zip(x, ys):
+            ax.annotate(f"{yi:.0f}%", (xi, yi), textcoords="offset points",
+                        xytext=(0, 8), ha="center", fontsize=8,
+                        color=COLORS[i % len(COLORS)])
+    ax.set_xticks(x); ax.set_xticklabels([str(s) for s in ladder])
+    ax.set_xlabel("few-shot examples the agent had escalated to")
+    ax.set_ylabel("samples solved so far (%)")
+    ax.set_title("[MAIN] How far up the ladder each dataset needs to go",
+                 fontsize=11, fontweight="bold")
+    ax.set_ylim(-5, 105); ax.grid(alpha=0.3, linestyle="--"); ax.legend(fontsize=9)
+
+    bars = [
+        (axes[0][1], "escalation steps used", lambda r: r["rungs"], "steps"),
+        (axes[1][0], "total latency per sample", lambda r: r["latency_s"], "seconds"),
+        (axes[1][1], "input tokens per sample", lambda r: r["input_tokens"], "tokens"),
+    ]
+    for ax, subtitle, pick, unit in bars:
+        vals = [mean([pick(r) for r in grouped[d]]) for d in datasets]
+        ax.bar(range(len(datasets)), vals,
+               color=[COLORS[i % len(COLORS)] for i in range(len(datasets))], width=0.5)
+        for i, v in enumerate(vals):
+            ax.annotate(f"{v:,.1f}", (i, v), textcoords="offset points",
+                        xytext=(0, 4), ha="center", fontsize=9)
+        ax.set_xticks(range(len(datasets))); ax.set_xticklabels(datasets)
+        ax.set_ylabel(unit); ax.set_title(f"Average {subtitle}", fontsize=11)
+        ax.grid(alpha=0.3, linestyle="--", axis="y")
+
+    fig.suptitle(title, fontsize=13, fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.savefig(out_path, dpi=160)
+    print(f"\nsaved -> {out_path}")
+
+
+def print_escalate_table(grouped, ladder):
+    header = f"{'dataset':<12}{'n':>5}{'steps':>8}{'solved%':>9}{'latency_s':>11}{'in_tok':>9}"
+    print(header); print("-" * len(header))
+    for dataset in sorted(grouped):
+        recs = grouped[dataset]
+        solved = 100.0 * sum(1 for r in recs if r["solved_at"] is not None) / len(recs)
+        print(f"{dataset:<12}{len(recs):>5}{mean([r['rungs'] for r in recs]):>8.2f}"
+              f"{solved:>9.1f}{mean([r['latency_s'] for r in recs]):>11.2f}"
+              f"{mean([r['input_tokens'] for r in recs]):>9.0f}")
+        counts = {shot: sum(1 for r in recs if r["solved_at"] == shot) for shot in ladder}
+        unsolved = sum(1 for r in recs if r["solved_at"] is None)
+        detail = "  ".join(f"{shot}-shot:{counts[shot]}" for shot in ladder)
+        print(f"{'':12}  풀린 지점 -> {detail}  못 품:{unsolved}")
+
+
 def load_samples(path):
     """(dataset, shot) -> 샘플별 요약 dict 로 접는다."""
     per_sample = defaultdict(lambda: {"loops": 0, "latency_s": 0.0,
@@ -132,9 +229,18 @@ def main():
     p.add_argument("--title", default="Few-shot count vs Agent loop cost (same Gemini model)")
     args = p.parse_args()
 
-    grouped = load_samples(args.results)
-    if not grouped:
+    rows = read_rows(args.results)
+    if not rows:
         raise SystemExit(f"[error] {args.results} 에 집계할 행이 없다.")
+
+    if detect_mode(rows) == "escalate":
+        ladder = sorted({int(r["shot_count"]) for r in rows})
+        grouped = escalate_summary(rows)
+        print_escalate_table(grouped, ladder)
+        draw_escalate(grouped, ladder, args.out, args.title)
+        return
+
+    grouped = load_samples(args.results)
     table = aggregate(grouped)
     datasets = sorted({d for d, _ in table})
     shots = sorted({s for _, s in table})

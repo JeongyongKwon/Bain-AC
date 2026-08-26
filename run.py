@@ -113,6 +113,27 @@ class Dataset:
         self.instruction = instruction
 
 
+INSTRUCTION_TEMPLATE = (
+    "You are a classifier.\n"
+    "You are given {subject}. Assign the correct label(s).\n"
+    "Allowed labels (use these exact strings):\n"
+    "{labels}\n"
+    "Rules:\n"
+    "- Output ONLY the label(s), comma-separated, on a single line.\n"
+    "- Output every label that applies.\n"
+    "- Never output an explanation, a sentence, or markdown."
+)
+
+
+def build_instruction(subject: str, labels) -> str:
+    """두 데이터셋이 완전히 같은 틀을 쓴다. 입력이 무엇인지 한 문장만 다르다.
+
+    한쪽에만 데이터셋 이름이나 도메인 힌트를 주면 그 자체가 교란 변수가 된다.
+    """
+    return INSTRUCTION_TEMPLATE.format(
+        subject=subject, labels="\n".join(f"- {l}" for l in labels))
+
+
 def _index_images(root: Path) -> dict:
     """data-dir 아래의 모든 이미지 파일을 파일명 -> 경로 로 인덱싱한다."""
     index = {}
@@ -176,16 +197,7 @@ def load_chestxray(args, rng) -> Dataset:
         sys.exit(f"[error] 데이터가 부족하다: shot_pool={len(shot_pool)} "
                  f"(필요 {max(args.shots)}), eval={len(eval_samples)}")
 
-    instruction = (
-        "You are a chest X-ray finding classifier for the NIH ChestX-ray14 dataset.\n"
-        "Look at the frontal chest X-ray image and report every finding label that applies.\n"
-        "Allowed labels (use these exact strings):\n"
-        + "\n".join(f"- {l}" for l in CHEST_LABELS) + "\n"
-        "Rules:\n"
-        "- Output ONLY the labels, comma-separated, on a single line.\n"
-        "- If there is no finding, output exactly: No Finding\n"
-        "- Never output an explanation, a sentence, or markdown."
-    )
+    instruction = build_instruction("a frontal chest X-ray image", CHEST_LABELS)
     return Dataset("chestxray", "multilabel_classification", CHEST_LABELS,
                    shot_pool, eval_samples, instruction)
 
@@ -227,15 +239,8 @@ def load_sequence(args, rng) -> Dataset:
         sys.exit(f"[error] 데이터가 부족하다: shot_pool={len(shot_pool)} "
                  f"(필요 {max(args.shots)}), eval={len(eval_samples)}")
 
-    instruction = (
-        "You are a biological sequence classifier.\n"
-        f"{args.seq_desc or describe_sequences([s.payload for s in rows[:200]])} Classify it.\n"
-        "Allowed labels (use these exact strings):\n"
-        + "\n".join(f"- {l}" for l in labels) + "\n"
-        "Rules:\n"
-        "- Output ONLY the label(s), comma-separated, on a single line.\n"
-        "- Never output an explanation, a sentence, or markdown."
-    )
+    subject = args.seq_desc or describe_sequences([s.payload for s in rows[:200]])
+    instruction = build_instruction(subject, labels)
     task_type = "singlelabel_classification" if single_label else "multilabel_classification"
     return Dataset("sequence", task_type, labels, shot_pool, eval_samples, instruction)
 
@@ -251,11 +256,10 @@ def describe_sequences(samples) -> str:
     chars = collections.Counter(c for s in samples for c in s if c.isalpha())
     total = sum(chars.values()) or 1
     nucleic = sum(n for c, n in chars.items() if c in NUCLEOTIDE_ALPHABET) / total
-    kind = ("a DNA sequence written in the A/C/G/T alphabet" if nucleic > 0.95
+    text = ("a DNA sequence written in the A/C/G/T alphabet" if nucleic > 0.95
             else "a protein sequence written in the standard amino-acid alphabet")
-    text = f"You are given {kind}."
     if sum(s.count("|") for s in samples) >= len(samples) * 0.9:
-        text += " The string holds two parts separated by '|'."
+        text += ", holding two parts separated by '|'"
     return text
 
 
@@ -641,16 +645,93 @@ def run_condition(args, dataset, shot_count, writer, fh, counter, total):
                 break
 
 
-def load_done(path: Path, max_loops: int) -> set:
-    """이미 종료(정답 도달 또는 max loop 소진)된 (조건, 샘플) 키를 모은다."""
+def run_escalate(args, dataset, writer, fh, counter, total):
+    """B 모드: 정답이 나올 때까지 few-shot 예시 수를 사다리로 올려가며 재시도한다.
+
+    grid 모드와 달리 매 재시도의 프롬프트가 실제로 달라진다.
+    loop_index 는 사다리의 몇 번째 칸인지를, shot_count 는 그 칸의 예시 수를 뜻한다.
+    """
+    args._mock_labels = [normalize_label(l) for l in dataset.labels]
+    ladder = args.shots
+    prefixes = {shot: build_fewshot_contents(dataset.shot_pool[:shot], args.image_max_side)
+                for shot in ladder}
+
+    for sample in dataset.eval_samples:
+        counter[0] += 1
+        key = (dataset.name, args.model_label, str(args.seed), sample.sample_id)
+        if key in args._done:
+            print(f"[{counter[0]}/{total}] skip (resume) dataset={dataset.name} "
+                  f"sample={sample.sample_id}")
+            continue
+
+        user_turn = {"role": "user", "parts": sample_parts(sample, args.image_max_side)}
+        elapsed_s, api_failures = 0.0, 0
+        rung = 0
+
+        while rung < len(ladder):
+            shot = ladder[rung]
+            throttle(args)
+            payload = build_payload(args, prefixes[shot] + [user_turn])
+            result = call_model(args, payload, dataset.instruction)
+            elapsed_s += result.latency_ms / 1000.0
+
+            if result.transport:
+                api_failures += 1
+                predicted, correct = f"API_FAILURE: {result.error}", False
+            elif result.error and not result.text.strip():
+                rung, api_failures = rung + 1, 0
+                predicted, correct = f"ERROR: {result.error}", False
+            else:
+                rung, api_failures = rung + 1, 0
+                pred = normalize_answer(result.text)
+                predicted, correct = render_labels(pred), pred == sample.gt
+
+            writer.writerow({
+                "dataset": dataset.name,
+                "task_type": dataset.task_type,
+                "model": args.model_label,
+                "shot_count": shot,
+                "seed": args.seed,
+                "sample_id": sample.sample_id,
+                "loop_index": 0 if result.transport else rung,
+                "predicted": predicted,
+                "gt": render_labels(sample.gt),
+                "correct": correct,
+                "latency_ms": round(result.latency_ms, 1),
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "elapsed_s": round(elapsed_s, 3),
+            })
+            fh.flush()
+
+            print(f"[{counter[0]}/{total}] dataset={dataset.name} sample={sample.sample_id} "
+                  f"rung={'-' if result.transport else rung}/{len(ladder)} shot={shot} "
+                  f"correct={correct}" + (f" | {predicted[:50]}" if not correct else ""))
+
+            if correct:
+                break
+            if result.transport and api_failures >= args.max_api_failures:
+                print(f"  [give up] API 실패 {api_failures}회 연속 -> 이 샘플은 건너뛴다")
+                break
+
+
+def load_done(path: Path, args) -> set:
+    """이미 끝난 (조건, 샘플) 키를 모은다. 종료 조건은 모드마다 다르다."""
     done = set()
     if not path.exists():
         return done
+    top_shot = max(args.shots)
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
-            key = (row["dataset"], row["model"], row["shot_count"], row["seed"], row["sample_id"])
             loop_index = int(row["loop_index"])
-            if row["correct"] == "True" or (loop_index and loop_index >= max_loops):
+            if args.mode == "escalate":
+                key = (row["dataset"], row["model"], row["seed"], row["sample_id"])
+                finished = row["correct"] == "True" or int(row["shot_count"]) >= top_shot
+            else:
+                key = (row["dataset"], row["model"], row["shot_count"],
+                       row["seed"], row["sample_id"])
+                finished = row["correct"] == "True" or (loop_index and loop_index >= args.max_loops)
+            if finished:
                 done.add(key)
     return done
 
@@ -690,7 +771,11 @@ def parse_args(argv=None):
                    help="auto = 모델 이름으로 판단 (claude-* -> anthropic)")
     p.add_argument("--shots", type=int, nargs="+", default=[0, 1, 4, 16], help="few-shot 예시 개수")
     p.add_argument("--samples", type=int, default=25, help="데이터셋당 평가 샘플 수")
-    p.add_argument("--max-loops", type=int, default=5, help="샘플당 최대 Agent loop 횟수")
+    p.add_argument("--max-loops", type=int, default=5,
+                   help="grid 모드에서 샘플당 최대 Agent loop 횟수 (escalate 모드에선 사다리 길이가 대신한다)")
+    p.add_argument("--mode", choices=["grid", "escalate"], default="grid",
+                   help="grid = shot 조건별로 같은 프롬프트를 반복. "
+                        "escalate = 정답까지 shot 을 사다리로 올려가며 재시도")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--pool-size", type=int, default=16,
                    help="few-shot 예시를 뽑아 둘 held-out pool 크기. "
@@ -777,7 +862,7 @@ def main(argv=None):
         datasets.append(load_sequence(args, random.Random(f"{args.seed}:sequence")))
 
     out_path = Path(args.out)
-    args._done = load_done(out_path, args.max_loops) if args.resume else set()
+    args._done = load_done(out_path, args) if args.resume else set()
 
     if args.show_prompt:
         for dataset in datasets:
@@ -785,11 +870,15 @@ def main(argv=None):
                 show_prompt(args, dataset, shot)
         return
 
-    total = sum(len(d.eval_samples) for d in datasets) * len(args.shots)
+    per_dataset = 1 if args.mode == "escalate" else len(args.shots)
+    total = sum(len(d.eval_samples) for d in datasets) * per_dataset
     if args.env_file_used:
         print(f"env loaded from {args.env_file_used}")
+    ladder = " -> ".join(str(x) for x in args.shots)
+    tail = f"ladder={ladder}" if args.mode == "escalate" else \
+           f"shots={args.shots} max_loops={args.max_loops}"
     print(f"provider={args.provider} model={args.model} thinking={args.thinking} "
-          f"shots={args.shots} max_loops={args.max_loops} seed={args.seed} conditions={total}")
+          f"mode={args.mode} {tail} seed={args.seed} conditions={total}")
     for d in datasets:
         print(f"  - {d.name}: eval={len(d.eval_samples)} shot_pool={len(d.shot_pool)} "
               f"labels={len(d.labels)} task={d.task_type}")
@@ -804,8 +893,11 @@ def main(argv=None):
             fh.flush()
         try:
             for dataset in datasets:
-                for shot in args.shots:
-                    run_condition(args, dataset, shot, writer, fh, counter, total)
+                if args.mode == "escalate":
+                    run_escalate(args, dataset, writer, fh, counter, total)
+                else:
+                    for shot in args.shots:
+                        run_condition(args, dataset, shot, writer, fh, counter, total)
         except KeyboardInterrupt:
             print("\n[interrupted] 지금까지의 결과는 CSV 에 남아 있다.")
 
