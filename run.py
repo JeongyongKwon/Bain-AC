@@ -92,13 +92,14 @@ def render_labels(labels) -> str:
 class Sample:
     """한 건의 평가 대상. kind 는 'image' 또는 'text'."""
 
-    __slots__ = ("sample_id", "kind", "payload", "gt")
+    __slots__ = ("sample_id", "kind", "payload", "gt", "gt_raw")
 
-    def __init__(self, sample_id, kind, payload, gt):
+    def __init__(self, sample_id, kind, payload, gt_raw):
         self.sample_id = sample_id
         self.kind = kind
-        self.payload = payload          # image: Path / text: str
-        self.gt = frozenset(gt)         # normalized label 집합
+        self.payload = payload                  # image: Path / text: str
+        self.gt_raw = list(gt_raw)              # 원본 표기 (few-shot 예시에 그대로 보여준다)
+        self.gt = frozenset(normalize_label(x) for x in gt_raw)   # 비교용 정규화 집합
 
 
 class Dataset:
@@ -137,11 +138,10 @@ def load_chestxray(args, rng) -> Dataset:
             path = images.get(name)
             if path is None:
                 continue
-            gt = {normalize_label(x) for x in (row.get("Finding Labels") or "").split("|")}
-            gt = {g for g in gt if g}
+            gt = [x.strip() for x in (row.get("Finding Labels") or "").split("|") if x.strip()]
             if not gt:
                 continue
-            if args.drop_no_finding and gt == {"no finding"}:
+            if args.drop_no_finding and [normalize_label(g) for g in gt] == ["no finding"]:
                 continue
             rows.append((row.get("Patient ID") or name, name, path, gt))
 
@@ -202,8 +202,7 @@ def load_sequence(args, rng) -> Dataset:
                 sys.exit(f"[error] '{col}' 컬럼이 {path} 에 없다. 있는 컬럼: {reader.fieldnames}")
         for i, row in enumerate(reader):
             seq = (row[args.seq_col] or "").strip().upper()
-            gt = {normalize_label(x) for x in re.split(r"[,|]", row[args.seq_label_col] or "")}
-            gt = {g for g in gt if g}
+            gt = [x.strip() for x in re.split(r"[,|]", row[args.seq_label_col] or "") if x.strip()]
             if not seq or not gt:
                 continue
             if args.seq_max_len and len(seq) > args.seq_max_len:
@@ -214,7 +213,7 @@ def load_sequence(args, rng) -> Dataset:
     if not rows:
         sys.exit("[error] 염기서열 CSV 에서 유효한 행을 읽지 못했다.")
 
-    labels = sorted({l for s in rows for l in s.gt})
+    labels = sorted({l for s in rows for l in s.gt_raw})
     rng.shuffle(rows)
 
     pool_rows, eval_rows = rows[: args.pool_size], rows[args.pool_size:]
@@ -248,7 +247,7 @@ def _stratified_pool(rows, k, labels, rng):
     """
     buckets = {l: [] for l in labels}
     for s in rows:
-        buckets[next(iter(s.gt))].append(s)
+        buckets[s.gt_raw[0]].append(s)
     for b in buckets.values():
         rng.shuffle(b)
     order, picked = list(labels), []
@@ -308,8 +307,44 @@ def build_fewshot_contents(shots, max_side: int) -> list:
     contents = []
     for s in shots:
         contents.append({"role": "user", "parts": sample_parts(s, max_side)})
-        contents.append({"role": "model", "parts": [{"text": render_labels(s.gt)}]})
+        contents.append({"role": "model", "parts": [{"text": ", ".join(s.gt_raw)}]})
     return contents
+
+
+def describe_part(part: dict, width: int = 100) -> str:
+    """프롬프트 확인용으로 part 하나를 사람이 읽을 수 있게 표현한다."""
+    if "text" in part:
+        text = part["text"]
+        if len(text) <= width * 3:
+            return text
+        return f"{text[:width * 2]}\n      ... (총 {len(text)}자 중 일부)"
+    blob = part.get("inlineData", {})
+    n_bytes = len(blob.get("data", "")) * 3 // 4
+    size = f"{n_bytes / 1024:.0f} KB" if n_bytes >= 1024 else f"{n_bytes} B"
+    return f"[IMAGE {blob.get('mimeType')} / {size}]"
+
+
+def show_prompt(args, dataset, shot_count):
+    """API 를 호출하지 않고, 실제로 전송될 프롬프트를 그대로 출력한다."""
+    prefix = build_fewshot_contents(dataset.shot_pool[:shot_count], args.image_max_side)
+    sample = dataset.eval_samples[0]
+    contents = prefix + [{"role": "user", "parts": sample_parts(sample, args.image_max_side)}]
+
+    bar = "=" * 78
+    print(f"\n{bar}\n  dataset={dataset.name}  shot={shot_count}  "
+          f"(turns={len(contents)}, 평가 샘플={sample.sample_id})\n{bar}")
+    print("\n--- systemInstruction ---")
+    print(dataset.instruction)
+    print("\n--- contents ---")
+    for i, turn in enumerate(contents):
+        tag = "few-shot 예시" if i < len(prefix) else ">>> 실제 질문"
+        print(f"\n  [{turn['role']}] {tag}")
+        for part in turn["parts"]:
+            body = describe_part(part).replace("\n", "\n      ")
+            print(f"      {body}")
+    print(f"\n  [model] <- 여기에 모델이 답한다.")
+    print(f"      정답: {', '.join(sample.gt_raw)}   "
+          f"(normalize 후 {{{render_labels(sample.gt)}}} 와 집합 비교)")
 
 
 # --------------------------------------------------------------------------
@@ -317,14 +352,16 @@ def build_fewshot_contents(shots, max_side: int) -> list:
 # --------------------------------------------------------------------------
 
 class CallResult:
-    __slots__ = ("text", "input_tokens", "output_tokens", "latency_ms", "error")
+    __slots__ = ("text", "input_tokens", "output_tokens", "latency_ms", "error", "transport")
 
-    def __init__(self, text="", input_tokens="", output_tokens="", latency_ms=0.0, error=""):
+    def __init__(self, text="", input_tokens="", output_tokens="", latency_ms=0.0, error="",
+                 transport=False):
         self.text = text
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.latency_ms = latency_ms
         self.error = error
+        self.transport = transport   # True 면 모델 응답을 못 받은 것 (loop 로 세지 않는다)
 
 
 def _flatten(text: str, limit: int) -> str:
@@ -332,10 +369,44 @@ def _flatten(text: str, limit: int) -> str:
     return re.sub(r"\s+", " ", text).strip()[:limit]
 
 
-def call_gemini(args, contents, instruction) -> CallResult:
-    if args.mock:
-        return _mock_call(args)
+_RETRY_DELAY = re.compile(r'"retryDelay"\s*:\s*"([0-9.]+)s"')
 
+
+def _retry_delay(body: str, headers, fallback: float) -> float:
+    """429 응답이 알려주는 대기 시간을 쓴다. 없으면 지수 백오프."""
+    match = _RETRY_DELAY.search(body)
+    if match:
+        return min(float(match.group(1)) + 1.0, 60.0)
+    header = getattr(headers, "get", lambda _k: None)("Retry-After")
+    if header and header.isdigit():
+        return min(float(header) + 1.0, 60.0)
+    return fallback
+
+
+FATAL_HTTP = (400, 401, 403, 404)
+
+
+def fatal(message: str):
+    """모델명 오타·키 오류처럼 재시도해도 소용없는 실패는 즉시 중단한다."""
+    sys.exit(f"\n[fatal] {message}\n"
+             "        재시도해도 같은 결과라 실험을 중단한다. 설정을 고치고 다시 실행해라.")
+
+
+_last_call_at = [0.0]
+
+
+def throttle(args):
+    """호출 사이 최소 간격을 지킨다. RPM 제한이 있는 무료 tier 에서 필요하다."""
+    interval = max(args.sleep, 60.0 / args.rpm if args.rpm else 0.0)
+    if interval <= 0:
+        return
+    wait = _last_call_at[0] + interval - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+    _last_call_at[0] = time.monotonic()
+
+
+def call_gemini(args, contents, instruction) -> CallResult:
     body = {
         "contents": contents,
         "systemInstruction": {"parts": [{"text": instruction}]},
@@ -344,8 +415,9 @@ def call_gemini(args, contents, instruction) -> CallResult:
             "maxOutputTokens": args.max_output_tokens,
         },
     }
-    if args.thinking_budget is not None:
-        body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": args.thinking_budget}
+    budget = 0 if args.thinking == "off" else args.thinking_budget
+    if budget is not None:
+        body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": budget}
 
     payload = json.dumps(body).encode("utf-8")
     url = API_URL.format(model=args.model)
@@ -361,17 +433,20 @@ def call_gemini(args, contents, instruction) -> CallResult:
             latency_ms = (time.perf_counter() - started) * 1000.0
             return _parse_response(raw, latency_ms)
         except urllib.error.HTTPError as exc:
-            detail = _flatten(exc.read().decode("utf-8", "replace"), 200)
-            last_error = f"HTTP {exc.code}: {detail}"
+            body = exc.read().decode("utf-8", "replace")
+            last_error = f"HTTP {exc.code}: {_flatten(body, 200)}"
+            if exc.code in FATAL_HTTP:
+                fatal(f"Gemini {last_error}")
             retryable = exc.code in (408, 429, 500, 502, 503, 504)
+            wait = _retry_delay(body, exc.headers, float(2 ** attempt))
         except Exception as exc:                     # timeout / 네트워크 오류
             last_error = _flatten(f"{type(exc).__name__}: {exc}", 200)
-            retryable = True
+            retryable, wait = True, float(2 ** attempt)
         if not retryable or attempt == args.max_retries:
             break
-        time.sleep(2 ** attempt)                     # transport 재시도는 loop 로 세지 않는다
+        time.sleep(wait)
 
-    return CallResult(latency_ms=0.0, error=last_error)
+    return CallResult(latency_ms=0.0, error=last_error, transport=True)
 
 
 def _parse_response(raw: dict, latency_ms: float) -> CallResult:
@@ -386,6 +461,88 @@ def _parse_response(raw: dict, latency_ms: float) -> CallResult:
     text = "".join(p.get("text", "") for p in parts)
     error = "" if text.strip() else f"empty text (finishReason={candidates[0].get('finishReason')})"
     return CallResult(text, in_tok, out_tok, latency_ms, error)
+
+
+def to_anthropic_messages(contents: list) -> list:
+    """Gemini contents 를 Anthropic messages 로 옮긴다 (샘플당 한 번만 호출한다)."""
+    messages = []
+    for turn in contents:
+        blocks = []
+        for part in turn["parts"]:
+            if "text" in part:
+                blocks.append({"type": "text", "text": part["text"]})
+            else:
+                blob = part["inlineData"]
+                blocks.append({"type": "image", "source": {
+                    "type": "base64",
+                    "media_type": blob["mimeType"],
+                    "data": blob["data"],
+                }})
+        messages.append({
+            "role": "assistant" if turn["role"] == "model" else "user",
+            "content": blocks,
+        })
+    return messages
+
+
+def _anthropic_client(args):
+    if getattr(args, "_client", None) is None:
+        try:
+            import anthropic
+        except ImportError:
+            sys.exit("[error] Anthropic 백엔드에는 SDK 가 필요하다: pip install anthropic")
+        args._anthropic = anthropic
+        args._client = anthropic.Anthropic(api_key=args.api_key, timeout=args.timeout,
+                                           max_retries=args.max_retries)
+    return args._client
+
+
+def call_anthropic(args, messages, instruction) -> CallResult:
+    """Claude 로 같은 실험을 돌린다. SDK 가 429/5xx 재시도를 처리한다."""
+    client = _anthropic_client(args)
+    anthropic = args._anthropic
+
+    kwargs = {
+        "model": args.model,
+        "max_tokens": args.max_output_tokens,
+        "system": instruction,
+        "messages": messages,
+    }
+    if args.thinking == "off":
+        kwargs["thinking"] = {"type": "disabled"}
+    # temperature 는 Sonnet 5 등 최신 모델에서 제거되어 보내면 400 이 난다.
+
+    started = time.perf_counter()
+    try:
+        resp = client.messages.create(**kwargs)
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError,
+            anthropic.NotFoundError, anthropic.BadRequestError) as exc:
+        fatal(f"Anthropic {type(exc).__name__}: {_flatten(str(exc), 300)}")
+    except Exception as exc:                        # rate limit / 5xx / 네트워크
+        return CallResult(latency_ms=0.0, transport=True,
+                          error=_flatten(f"{type(exc).__name__}: {exc}", 200))
+
+    latency_ms = (time.perf_counter() - started) * 1000.0
+    text = "".join(b.text for b in resp.content if b.type == "text")
+    in_tok, out_tok = resp.usage.input_tokens, resp.usage.output_tokens
+    if resp.stop_reason == "refusal":
+        detail = getattr(resp.stop_details, "category", None)
+        return CallResult("", in_tok, out_tok, latency_ms, f"refusal: {detail}")
+    error = "" if text.strip() else f"empty text (stop_reason={resp.stop_reason})"
+    return CallResult(text, in_tok, out_tok, latency_ms, error)
+
+
+def build_payload(args, contents):
+    """provider 별 요청 형태로 한 번만 변환해 두고 loop 마다 재사용한다."""
+    return to_anthropic_messages(contents) if args.provider == "anthropic" else contents
+
+
+def call_model(args, payload, instruction) -> CallResult:
+    if args.mock:
+        return _mock_call(args)
+    if args.provider == "anthropic":
+        return call_anthropic(args, payload, instruction)
+    return call_gemini(args, payload, instruction)
 
 
 def _mock_call(args) -> CallResult:
@@ -412,16 +569,26 @@ def run_condition(args, dataset, shot_count, writer, fh, counter, total):
                   f"shot={shot_count} sample={sample.sample_id}")
             continue
 
-        contents = prefix + [{"role": "user", "parts": sample_parts(sample, args.image_max_side)}]
+        payload = build_payload(args, prefix + [
+            {"role": "user", "parts": sample_parts(sample, args.image_max_side)}])
         elapsed_s = 0.0
+        loop_index, api_failures = 0, 0
 
-        for loop_index in range(1, args.max_loops + 1):
-            result = call_gemini(args, contents, dataset.instruction)
+        while loop_index < args.max_loops:
+            throttle(args)
+            result = call_model(args, payload, dataset.instruction)
             elapsed_s += result.latency_ms / 1000.0
 
-            if result.error and not result.text.strip():
+            if result.transport:
+                # 모델이 응답을 못 준 것(429, 타임아웃 등)은 오답이 아니다.
+                # loop_index=0 으로 기록만 남기고 loop 예산을 쓰지 않는다.
+                api_failures += 1
+                predicted, correct = f"API_FAILURE: {result.error}", False
+            elif result.error and not result.text.strip():
+                loop_index, api_failures = loop_index + 1, 0
                 predicted, correct = f"ERROR: {result.error}", False
             else:
+                loop_index, api_failures = loop_index + 1, 0
                 pred = normalize_answer(result.text)
                 predicted, correct = render_labels(pred), pred == sample.gt
 
@@ -432,7 +599,7 @@ def run_condition(args, dataset, shot_count, writer, fh, counter, total):
                 "shot_count": shot_count,
                 "seed": args.seed,
                 "sample_id": sample.sample_id,
-                "loop_index": loop_index,
+                "loop_index": 0 if result.transport else loop_index,
                 "predicted": predicted,
                 "gt": render_labels(sample.gt),
                 "correct": correct,
@@ -444,13 +611,14 @@ def run_condition(args, dataset, shot_count, writer, fh, counter, total):
             fh.flush()                              # 중간에 죽어도 여기까지는 남는다
 
             print(f"[{counter[0]}/{total}] dataset={dataset.name} shot={shot_count} "
-                  f"sample={sample.sample_id} loop={loop_index} correct={correct}"
-                  + (f" | {predicted[:60]}" if not correct else ""))
+                  f"sample={sample.sample_id} loop={'-' if result.transport else loop_index} "
+                  f"correct={correct}" + (f" | {predicted[:60]}" if not correct else ""))
 
             if correct:
                 break
-            if args.sleep:
-                time.sleep(args.sleep)
+            if result.transport and api_failures >= args.max_api_failures:
+                print(f"  [give up] API 실패 {api_failures}회 연속 -> 이 샘플은 건너뛴다")
+                break
 
 
 def load_done(path: Path, max_loops: int) -> set:
@@ -461,19 +629,45 @@ def load_done(path: Path, max_loops: int) -> set:
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             key = (row["dataset"], row["model"], row["shot_count"], row["seed"], row["sample_id"])
-            if row["correct"] == "True" or int(row["loop_index"]) >= max_loops:
+            loop_index = int(row["loop_index"])
+            if row["correct"] == "True" or (loop_index and loop_index >= max_loops):
                 done.add(key)
     return done
 
 
 # --------------------------------------------------------------------------
 
+def load_dotenv(path: str) -> str:
+    """.env 파일이 있으면 환경변수로 읽어들인다.
+
+    이미 셸에 설정된 환경변수는 덮어쓰지 않는다 (셸 > .env 우선순위).
+    실행 디렉터리에 없으면 run.py 옆도 찾아본다.
+    """
+    candidates = [Path(path), Path(__file__).resolve().parent / path]
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        for line in candidate.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            line = line[7:] if line.startswith("export ") else line
+            key, sep, value = line.partition("=")
+            if sep:
+                os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+        return str(candidate)
+    return ""
+
+
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dataset", nargs="+", required=True, choices=["chestxray", "sequence"],
                    help="실행할 데이터셋")
-    p.add_argument("--model", default="gemini-2.5-flash", help="Gemini 멀티모달 모델 이름")
+    p.add_argument("--model", default="gemini-3.5-flash-lite",
+                   help="멀티모달 모델 이름. claude-* 를 주면 Anthropic 백엔드로 자동 전환된다")
+    p.add_argument("--provider", choices=["auto", "gemini", "anthropic"], default="auto",
+                   help="auto = 모델 이름으로 판단 (claude-* -> anthropic)")
     p.add_argument("--shots", type=int, nargs="+", default=[0, 1, 4, 16], help="few-shot 예시 개수")
     p.add_argument("--samples", type=int, default=25, help="데이터셋당 평가 샘플 수")
     p.add_argument("--max-loops", type=int, default=5, help="샘플당 최대 Agent loop 횟수")
@@ -497,14 +691,25 @@ def parse_args(argv=None):
     p.add_argument("--seq-max-len", type=int, default=0, help="염기서열 최대 길이 (0=자르지 않음)")
 
     p.add_argument("--temperature", type=float, default=1.0,
-                   help="0 이면 매 loop 가 같은 응답이 되어 loop 가 의미를 잃는다")
-    p.add_argument("--max-output-tokens", type=int, default=256)
+                   help="Gemini 전용. 0 이면 매 loop 가 같은 응답이 되어 loop 가 의미를 잃는다. "
+                        "Claude 최신 모델은 temperature 자체가 없어서 무시된다")
+    p.add_argument("--max-output-tokens", type=int, default=2048,
+                   help="thinking 이 켜져 있으면 여기서 thinking 토큰도 나간다. 너무 낮으면 빈 응답이 된다")
+    p.add_argument("--thinking", choices=["auto", "off"], default="auto",
+                   help="auto = 모델 기본값, off = thinking 비활성 (비용/지연 감소)")
     p.add_argument("--thinking-budget", type=int, default=None,
-                   help="Gemini 2.5 계열 thinking 토큰 예산 (0=비활성)")
+                   help="Gemini thinking 토큰 예산 (--thinking auto 일 때만 적용)")
     p.add_argument("--timeout", type=float, default=120.0)
     p.add_argument("--max-retries", type=int, default=3, help="전송 실패 재시도 (loop 로 세지 않음)")
-    p.add_argument("--sleep", type=float, default=0.0, help="호출 사이 대기 (rate limit 용)")
+    p.add_argument("--sleep", type=float, default=0.0, help="호출 사이 최소 대기 (초)")
+    p.add_argument("--rpm", type=float, default=0.0,
+                   help="분당 호출 수 상한. 무료 tier RPM 에 맞춰 자동으로 간격을 둔다 (0=제한 없음)")
+    p.add_argument("--max-api-failures", type=int, default=5,
+                   help="연속 API 실패가 이만큼 쌓이면 그 샘플을 포기한다")
     p.add_argument("--mock", action="store_true", help="API 없이 파이프라인만 점검 (결과는 무의미)")
+    p.add_argument("--show-prompt", action="store_true",
+                   help="API 를 호출하지 않고 실제 전송될 프롬프트만 출력하고 종료")
+    p.add_argument("--env-file", default=".env", help="API 키를 읽을 .env 경로")
 
     args = p.parse_args(argv)
     if max(args.shots) > args.pool_size:
@@ -514,9 +719,25 @@ def parse_args(argv=None):
     if "sequence" in args.dataset and not args.seq_csv:
         p.error("--dataset sequence 에는 --seq-csv 가 필요하다")
     args.model_label = ("mock:" if args.mock else "") + args.model
-    args.api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
-    if not args.mock and not args.api_key:
-        p.error("환경변수 GEMINI_API_KEY (또는 GOOGLE_API_KEY) 가 필요하다")
+    args.env_file_used = load_dotenv(args.env_file)
+    args._client = None
+
+    if args.provider == "auto":
+        args.provider = "anthropic" if args.model.startswith("claude") else "gemini"
+    if args.provider == "anthropic":
+        key_names = ("ANTHROPIC_API_KEY",)
+    else:
+        key_names = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    args.api_key = next((os.environ[k] for k in key_names if os.environ.get(k)), "")
+
+    if not args.mock and not args.show_prompt and not args.api_key:
+        primary = key_names[0]
+        p.error(f"{args.provider} 백엔드에 필요한 API 키가 없다. 다음 중 하나로 넣어라:\n"
+                f"  export {primary}=...            (셸 환경변수)\n"
+                f"  echo '{primary}=...' > {args.env_file}   (.env 파일, git 에 커밋되지 않음)")
+    if args.thinking == "auto" and args.max_output_tokens < 1024:
+        p.error(f"--thinking auto 인데 --max-output-tokens 가 {args.max_output_tokens} 로 낮다. "
+                "thinking 토큰이 예산을 다 써서 빈 응답이 된다. 1024 이상으로 올리거나 --thinking off 를 써라")
     return args
 
 
@@ -536,9 +757,17 @@ def main(argv=None):
     out_path = Path(args.out)
     args._done = load_done(out_path, args.max_loops) if args.resume else set()
 
+    if args.show_prompt:
+        for dataset in datasets:
+            for shot in args.shots:
+                show_prompt(args, dataset, shot)
+        return
+
     total = sum(len(d.eval_samples) for d in datasets) * len(args.shots)
-    print(f"model={args.model} shots={args.shots} max_loops={args.max_loops} "
-          f"seed={args.seed} conditions={total}")
+    if args.env_file_used:
+        print(f"env loaded from {args.env_file_used}")
+    print(f"provider={args.provider} model={args.model} thinking={args.thinking} "
+          f"shots={args.shots} max_loops={args.max_loops} seed={args.seed} conditions={total}")
     for d in datasets:
         print(f"  - {d.name}: eval={len(d.eval_samples)} shot_pool={len(d.shot_pool)} "
               f"labels={len(d.labels)} task={d.task_type}")

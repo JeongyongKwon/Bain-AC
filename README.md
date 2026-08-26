@@ -23,7 +23,10 @@ run.py         실험 러너 (데이터 로딩 → few-shot 구성 → Gemini �
 results.csv    호출 단위 raw execution log (별도 log 파일은 만들지 않는다)
 plot.py        results.csv 집계 → chart.png
 chart.png      결과 그래프 (plot.py 실행 시 생성)
+.gitignore     .env / data/ 를 커밋에서 제외
 ```
+
+데이터셋과 API 키는 레포에 넣지 않는다. 로컬에 `data/` 와 `.env` 로 두면 된다.
 
 `run.py` 는 표준 라이브러리만 사용한다. (Pillow 가 설치되어 있으면 이미지 축소에만 사용)
 `plot.py` 는 `matplotlib` 이 필요하다.
@@ -31,35 +34,105 @@ chart.png      결과 그래프 (plot.py 실행 시 생성)
 ```bash
 pip install matplotlib          # plot.py 용
 pip install pillow              # (선택) 이미지 축소로 업로드 용량 절감
-export GEMINI_API_KEY=...       # 또는 GOOGLE_API_KEY
 ```
+
+---
+
+## API 키 (env)
+
+`GEMINI_API_KEY` (없으면 `GOOGLE_API_KEY`) 하나만 있으면 된다.
+[Google AI Studio](https://aistudio.google.com/apikey) 에서 발급한다.
+
+**방법 1 — 셸 환경변수** (그 터미널 세션에서만 유효)
+
+```bash
+export GEMINI_API_KEY=AIza...
+python run.py --dataset ...
+```
+
+**방법 2 — `.env` 파일** (권장. 레포 루트에 두면 `run.py` 가 자동으로 읽는다)
+
+```bash
+echo 'GEMINI_API_KEY=AIza...' > .env
+```
+
+```
+Bain-AC/
+  run.py
+  .env        <- 여기. .gitignore 에 있어서 커밋되지 않는다
+```
+
+- 경로를 바꾸려면 `--env-file path/to/.env`
+- 실행 디렉터리에 없으면 `run.py` 옆도 찾아본다
+- **셸 환경변수가 `.env` 보다 우선한다** (이미 export 된 값은 덮어쓰지 않는다)
+- 키가 없으면 실행 즉시 에러로 알려준다. `--mock` 은 키 없이 돌아간다
 
 ---
 
 ## 데이터 준비
 
+데이터는 레포에 넣지 않는다 (`data/` 는 `.gitignore` 에 있다). 로컬에 받아서 경로만 넘긴다.
+
 ### A. NIH ChestX-ray14
 
-`--data-dir` 아래에 메타데이터 CSV 와 이미지가 있으면 된다. 이미지는 하위 폴더를 재귀 탐색한다.
+받는 곳 (둘 다 같은 데이터다)
+
+| 출처 | 방법 |
+|---|---|
+| NIH 공식 (Box) | <https://nihcc.app.box.com/v/ChestXray-NIHCC> — `images_001.tar.gz` ~ `images_012.tar.gz` + `Data_Entry_2017_v2020.csv`. 공식 `batch_download_zips.py` 스크립트도 같이 올라와 있다 |
+| Kaggle 미러 | `kaggle datasets download -d nih-chest-xrays/data` (전체 다운로드). 특정 파일만 받으려면 `-f <파일명>` |
+
+전체는 112,120장 / 약 42GB 다. **전부 받을 필요 없다.**
+`run.py` 는 실제로 존재하는 이미지 파일만 인덱싱하고 메타데이터에서 파일이 없는 행은 건너뛴다.
+그래서 **샤드 하나(약 4~5천 장)만 받아도** `--samples 50` 규모 실험은 그대로 돌아간다.
 
 ```
-chestxray14/
-  Data_Entry_2017.csv          # "Image Index", "Finding Labels", "Patient ID" 컬럼 사용
-  images_001/images/*.png
-  images_002/images/*.png
-  ...
+data/chestxray14/
+  Data_Entry_2017.csv          # "Image Index", "Finding Labels", "Patient ID" 컬럼만 사용
+  images_001/images/*.png      # 하위 폴더는 재귀 탐색하므로 구조는 자유
 ```
 
-few-shot pool 과 평가 샘플은 **환자 단위로 분리**해 leakage 를 막는다.
+```bash
+--data-dir data/chestxray14
+# 메타데이터 파일명이 다르면 (예: 공식 Box 판)
+--data-dir data/chestxray14 --chest-csv Data_Entry_2017_v2020.csv
+```
+
+- few-shot pool 과 평가 샘플은 **환자 단위로 분리**해 leakage 를 막는다.
+- `No Finding` 이 전체의 절반 이상이라 그대로 쓰면 "No Finding 만 찍어도 맞는" 샘플이 많아진다.
+  난이도를 올리려면 `--drop-no-finding` 을 쓴다.
+- 원본이 1024×1024 PNG 라 16-shot 이면 업로드가 커진다. Pillow 를 깔면
+  `--image-max-side` (기본 512) 로 줄여서 보낸다.
 
 ### B. 염기서열
 
-task/데이터셋이 확정되면 아래 형태의 CSV 로만 맞춰 주면 그대로 돌아간다.
+**아직 확정 안 됨.** 아래 중 하나를 고르면 되고, 어느 걸 골라도 코드 수정은 필요 없다.
+CSV 형식만 맞추면 된다.
+
+| 후보 | task | 특징 |
+|---|---|---|
+| Genomic Benchmarks `human_nontata_promoters` | promoter / non-promoter 2분류 | 251bp, 약 36k. `pip install genomic-benchmarks` 또는 HuggingFace |
+| GUE (DNABERT-2 벤치마크) | promoter, splice site, TF binding 등 | 이미 `sequence,label` CSV 로 배포되어 거의 그대로 쓸 수 있다 |
+| UCI Splice-junction | EI / IE / N 3분류 | 60bp, 3,190건. 가장 가볍게 시작하기 좋다 |
+
+추천: **길이가 짧은 2~3분류**부터. 서열이 길면 16-shot 프롬프트의 input token 이 급격히 늘어
+"loop 가 줄어드는 효과"와 "프롬프트가 비싸지는 효과"가 섞인다.
+
+> ⚠️ **label 이름은 `0` / `1` 같은 숫자를 쓰지 말고 의미 있는 문자열로 바꿔라.**
+> 라벨이 `0`/`1` 이면 0-shot 조건에서 모델이 어느 쪽이 promoter 인지 알 방법이 없어
+> 사실상 찍기가 되고, few-shot 효과가 과대평가된다.
+> `promoter` / `non_promoter` 처럼 바꿔서 0-shot 도 의미를 갖게 해야 비교가 성립한다.
+
+준비되면 아래 형태의 CSV 로만 맞춰 주면 된다.
 
 ```csv
 id,sequence,label
 s0,ACGTACGTTTGA...,promoter
 s1,GGCATTACGCAT...,non_promoter
+```
+
+```
+data/seq.csv
 ```
 
 ```bash
@@ -79,7 +152,7 @@ s1,GGCATTACGCAT...,non_promoter
 # 두 데이터셋을 한 번에
 python run.py \
   --dataset chestxray sequence \
-  --model gemini-2.5-flash \
+  --model gemini-3.5-flash-lite \
   --data-dir data/chestxray14 \
   --seq-csv data/seq.csv --seq-id-col id \
   --shots 0 1 4 16 \
@@ -95,22 +168,59 @@ python plot.py --results results.csv --out chart.png
 
 | 옵션 | 설명 |
 |---|---|
-| `--model` | Gemini 멀티모달 모델 이름 (두 데이터셋에 동일 적용) |
+| `--model` | 멀티모달 모델 이름 (두 데이터셋에 동일 적용, 기본 `gemini-3.5-flash-lite`) |
+| `--provider` | `auto`(기본) / `gemini` / `anthropic`. auto 는 모델 이름으로 판단한다 |
+| `--thinking` | `auto`(모델 기본값) / `off`(비용·지연 감소) |
 | `--shots` | few-shot 예시 개수 목록 (기본 `0 1 4 16`) |
 | `--samples` | 데이터셋당 평가 샘플 수 |
 | `--max-loops` | 샘플당 최대 Agent loop 횟수 |
 | `--pool-size` | few-shot 예시를 뽑아 두는 held-out pool 크기 (기본 16) |
 | `--temperature` | 기본 1.0 |
 | `--thinking-budget` | Gemini 2.5 계열의 thinking 토큰 예산 (`0` 이면 비활성) |
-| `--sleep` | 호출 간 대기 (rate limit 대응) |
+| `--rpm` | 분당 호출 수 상한. 무료 tier RPM 에 맞춰 자동 간격 (0=무제한) |
+| `--sleep` | 호출 사이 최소 대기 (초) |
+| `--max-api-failures` | 연속 API 실패가 이만큼 쌓이면 그 샘플을 포기 (기본 5) |
 | `--resume` | `results.csv` 에서 이미 끝난 (조건, 샘플) 은 건너뛴다 |
 | `--mock` | API 없이 파이프라인만 점검 (결과는 무의미, `model` 컬럼에 `mock:` prefix) |
+| `--env-file` | API 키를 읽을 `.env` 경로 (기본 `.env`) |
+| `--show-prompt` | API 호출 없이 **실제로 전송될 프롬프트만 출력**하고 종료 |
 
 동일 `--seed` 면 어떤 데이터셋/shot 조합을 실행하든 **같은 평가 샘플**이 뽑힌다.
 (데이터셋별 독립 RNG + 고정 `--pool-size`) 그래서 shot 조건을 나눠 돌려도 비교가 성립한다.
 
 few-shot 예시는 `1-shot ⊂ 4-shot ⊂ 16-shot` 이 되도록 같은 pool 의 prefix 를 쓴다.
 조건 사이에서 **바뀌는 것은 shot 수뿐이다.**
+
+---
+
+## 프롬프트 확인
+
+실제로 어떤 프롬프트가 나가는지는 API 호출 없이 그대로 볼 수 있다 (키도 필요 없다).
+
+```bash
+python run.py --dataset chestxray --data-dir data/chestxray14 --shots 0 4 --show-prompt
+python run.py --dataset sequence  --seq-csv data/seq.csv --shots 0 4 --show-prompt
+```
+
+프롬프트는 `run.py` 안에 있다.
+
+- 이미지: `load_chestxray()` 의 `instruction`
+- 염기서열: `load_sequence()` 의 `instruction`
+- few-shot 배치: `build_fewshot_contents()` — user/model 멀티턴으로 넣는다
+
+few-shot 예시의 답은 **데이터셋 원본 표기 그대로** 보여준다 (`Atelectasis`, `Pleural_Thickening`).
+정규화는 채점할 때만 하고, 예시가 소문자로 나가면 "정확히 이 문자열을 쓰라"는
+지시와 모순돼서 모델 행동에 영향을 준다.
+
+### 다른 백엔드
+
+기본은 Gemini 다. `--model claude-...` 를 주면 Anthropic 백엔드로 자동 전환된다
+(`pip install anthropic`, `ANTHROPIC_API_KEY` 필요).
+설계상 "두 데이터셋에 같은 멀티모달 모델" 이기만 하면 되므로 모델 종류는 바꿔도 실험이 성립한다.
+
+> ⚠️ Anthropic 경로는 **아직 실제 호출로 검증하지 않았다** (키가 없어서 변환 로직만 확인).
+> 실제로 쓰기 전에 소량으로 먼저 돌려봐야 한다.
+> Claude 최신 모델은 `temperature` 가 제거되어 있어서 `--temperature` 는 무시된다.
 
 ---
 
@@ -127,8 +237,47 @@ loop 안에서 **하지 않는 것**: prompt 수정 ❌ / shot 변경 ❌ / 힌�
 고정된 task 를 정답이 나올 때까지 반복할 뿐이다. 이전 loop 의 오답도 프롬프트에 넣지 않는다.
 
 - `--temperature 0` 이면 매 loop 가 같은 응답이 되어 loop 가 의미를 잃는다. 기본값 1.0 을 권장한다.
-- HTTP 429/5xx/타임아웃에 대한 전송 재시도는 **loop 로 세지 않는다** (`--max-retries`).
-  재시도까지 실패하면 그 호출은 오답 loop 1회로 기록되고 `predicted` 에 `ERROR: ...` 가 남는다.
+- HTTP 429/5xx/타임아웃은 **loop 로 세지 않는다.** 모델이 답을 준 게 아니라 호출 자체가 실패한 것이므로
+  오답으로 처리하면 loop count 지표가 오염된다.
+  - 먼저 `--max-retries` 만큼 재시도한다 (429 응답이 알려주는 `retryDelay` 를 존중, 최대 60초).
+  - 그래도 실패하면 `loop_index=0`, `predicted=API_FAILURE: ...` 로 **기록만 남기고** loop 예산을 쓰지 않는다.
+  - 연속 실패가 `--max-api-failures`(기본 5) 를 넘으면 그 샘플을 포기한다.
+  - `plot.py` 는 `loop_index=0` 행을 집계에서 제외한다.
+- 모델이 응답은 했는데 내용이 비었거나 차단된 경우는 **오답 loop 1회**로 센다 (`ERROR: ...`).
+
+### rate limit (무료 tier)
+
+무료 tier 한도는 **모델별로 다르다.** 실측값:
+
+| 모델 | RPM | RPD (하루) | 이미지 입력 |
+|---|---|---|---|
+| `gemini-3.5-flash-lite` | 15 | **500** | O |
+| `gemini-3.1-flash-lite` | 15 | **500** | O |
+| `gemini-3.6-flash` | 5 | 20 | O |
+| `gemini-3.5-flash` / `3.7-flash` | 5 | 20 | O |
+| `gemini-2.5-*` | - | - | 404 (신규 사용자 불가) |
+
+flash 계열은 **하루 20회**라 실험이 불가능하다. **flash-lite (500 RPD)** 를 쓴다.
+
+```bash
+--model gemini-3.5-flash-lite --rpm 12
+```
+
+RPM 보다 **TPM(분당 250K) 이 먼저 걸린다.** 실측으로 이미지 1장 ≈ 1,090 input token 이라
+16-shot 이면 호출당 약 18,700 token 이 나간다. RPM 15 를 다 쓰면 280K TPM 으로 한도를 넘는다.
+그래서 `--rpm 12` 정도로 두는 게 안전하다. 넘더라도 429 의 `retryDelay` 를 존중해 대기했다가
+이어서 돌기 때문에 데이터가 깨지지는 않고 느려지기만 한다.
+
+실측 (flash-lite, 32x32 이미지 기준):
+
+| 조건 | input tokens / call |
+|---|---|
+| 0-shot (이미지 1장) | 1,248 |
+| 2-shot (이미지 3장) | 3,437 |
+| 16-shot (이미지 17장, 추정) | 약 18,700 |
+
+`--rpm` 은 정답/오답과 무관하게 **매 호출 앞에서** 간격을 지킨다.
+(현재 한도는 <https://ai.dev/rate-limit> 에서 확인)
 
 ---
 
@@ -169,8 +318,8 @@ API 호출이 끝날 때마다 즉시 append + flush 한다. 중간에 프로세
 | `shot_count` | few-shot 예시 개수 |
 | `seed` | 샘플링 seed |
 | `sample_id` | 이미지 파일명 또는 서열 ID |
-| `loop_index` | 이 샘플의 몇 번째 loop 인가 (1부터) |
-| `predicted` | 정규화된 예측 label 집합 (실패 시 `ERROR: ...`) |
+| `loop_index` | 이 샘플의 몇 번째 loop 인가 (1부터). **`0` 은 API 실패**(429/타임아웃) 기록이며 loop 로 세지 않는다 |
+| `predicted` | 정규화된 예측 label 집합. 모델이 이상하게 답한 경우 `ERROR: ...`, API 자체가 실패한 경우 `API_FAILURE: ...` |
 | `gt` | 정규화된 정답 label 집합 |
 | `correct` | `True` / `False` |
 | `latency_ms` | 이번 호출 1회의 응답 시간 |
@@ -191,6 +340,8 @@ API 호출이 끝날 때마다 즉시 append + flush 한다. 중간에 프로세
 ## 지표
 
 `plot.py` 가 (dataset, shot_count) 단위로 집계한다.
+
+`loop_index=0` (API 실패) 행은 집계에서 빠진다.
 
 1. **Average loop count** — 메인 지표. 샘플별 `max(loop_index)` 의 평균.
    최대 loop 안에 못 맞춘 샘플은 `max_loops` 로 잘린 값(censored)이 들어가므로 success rate 와 함께 읽어야 한다.
